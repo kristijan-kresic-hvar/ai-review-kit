@@ -27,6 +27,12 @@ mkdir -p .claude/skills/pr-review-loop
 cp "$KIT/skills/pr-review-loop.md" .claude/skills/pr-review-loop/SKILL.md
 echo "installed .claude/skills/pr-review-loop/SKILL.md (autonomous fix loop)"
 
+# The babysitter — unattended sweep runner for cron/manual use, so PRs opened OUTSIDE
+# Claude Code (web UI, plain terminal) still get the loop.
+cp "$KIT/babysit.sh" .claude/ai-review-babysit.sh
+chmod +x .claude/ai-review-babysit.sh
+echo "installed .claude/ai-review-babysit.sh (unattended babysitter — see checklist)"
+
 # Review-optimized PR structure for everyone — GitHub pre-fills it on every new PR.
 if [ -f .github/pull_request_template.md ]; then
   echo ".github/pull_request_template.md exists — left as is"
@@ -83,9 +89,11 @@ if [ "$CODEX" = 1 ]; then
 fi
 echo "[gate]   optional but recommended: require status check 'merge-gate' on the"
 echo "         default branch (Settings -> Rulesets; private repos need Pro/Team)."
-echo "[loop]   per developer, once: in Claude Code say"
-echo "         \"schedule a recurring task: babysit my PRs every 30 minutes\""
-echo "         (unattended sweep even when no session is open; sessions in this"
-echo "         repo already sweep on start via the CLAUDE.md wiring)"
+echo "[loop]   babysitter routine (per developer, once) — pick ONE:"
+echo "         cron:        crontab -e   then add:"
+echo "                      */30 * * * * cd $(pwd) && .claude/ai-review-babysit.sh >> \$HOME/.ai-review-kit-babysit.log 2>&1"
+echo "         Claude Code: say \"schedule a recurring task: babysit my PRs every 30 minutes\""
+echo "         (sessions in this repo also sweep on start via the CLAUDE.md wiring;"
+echo "          the routine covers PRs opened outside Claude Code between sessions)"
 echo
 echo "Commit the added files on a branch and open a PR — the reviewers review it."

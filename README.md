@@ -66,10 +66,11 @@ path/to/ai-review-kit/setup.sh --codex    # Codex only
 ```
 
 Or skip the script and copy by hand — it only copies files and prints the auth
-checklist below. Six pieces at most: two workflows into `.github/workflows/`,
+checklist below. Seven pieces at most: two workflows into `.github/workflows/`,
 `AGENTS.md` at the repo root, `pull_request_template.md` to
 `.github/pull_request_template.md`, `skills/pr-review-loop.md` to
-`.claude/skills/pr-review-loop/SKILL.md` (the fix loop), and `CLAUDE.md.section`
+`.claude/skills/pr-review-loop/SKILL.md` (the fix loop), `babysit.sh` to
+`.claude/ai-review-babysit.sh` (the unattended runner), and `CLAUDE.md.section`
 appended to the repo's `CLAUDE.md` (the auto-run wiring).
 
 ### Claude leg (per repo, once)
@@ -153,12 +154,27 @@ A human hears from it in exactly three cases: reviewer-consensus disagreement, r
 cap (3) with an open P0/P1, or a fix no runnable check can verify. Plus the merge
 click — always human. **It never merges.**
 
-**The babysitter (unattended coverage):** the CLAUDE.md wiring also makes every Claude
-Code session in the repo sweep your open PRs on start — unhandled findings get the loop
-without anyone asking. For coverage while no session is open at all, each developer
-once tells Claude Code: *"schedule a recurring task: babysit my PRs every 30 minutes"*
-(user-level schedule; a repo script can't create it for you — that's the one per-dev
-sentence the kit can't automate away).
+### The babysitter — coverage for PRs opened ANY way
+
+The reviews themselves fire on every PR regardless of how it was opened (Claude via
+Actions, Codex via the Auto review toggle). The loop needs an agent, and it gets one
+through three layers:
+
+| PR opened via | Who runs the loop | Latency |
+|---|---|---|
+| Claude Code | CLAUDE.md wiring — fires unprompted right after `gh pr create` | immediate |
+| anything else (web UI, terminal) | the babysitter routine (below), or the next Claude Code session in the repo (session-start sweep) | up to the sweep interval |
+
+**The routine (per developer, once):** `setup.sh` installs `.claude/ai-review-babysit.sh`
+— a headless sweep runner (`claude -p` with a scoped allowlist: it can comment, resolve,
+and push fixes to PR branches; it cannot merge). Wire it to cron:
+
+    */30 * * * * cd /abs/path/to/repo && .claude/ai-review-babysit.sh >> "$HOME/.ai-review-kit-babysit.log" 2>&1
+
+Claude Code users can skip cron and instead say once: *"schedule a recurring task:
+babysit my PRs every 30 minutes"*. By default the babysitter handles PRs you authored;
+`.claude/ai-review-babysit.sh --all` babysits every open PR in the repo — one
+maintainer (or one always-on machine) can cover a whole team.
 
 ## Files
 
@@ -168,6 +184,7 @@ sentence the kit can't automate away).
 | `workflows/merge-gate.yml` | Adaptive two-leg merge gate (commit status) |
 | `AGENTS.md.example` | Codex adversarial briefing with the `## Code Review Rules` contract section |
 | `skills/pr-review-loop.md` | The autonomous fix loop — installed per-repo as a project-local Claude Code skill |
+| `babysit.sh` | Installed as `.claude/ai-review-babysit.sh` — headless sweep runner for cron/manual use (`--all` = whole team's PRs) |
 | `pull_request_template.md` | Installed as `.github/pull_request_template.md` — review-optimized PR structure (Summary / Scope / Deliberate trade-offs / Verification), pre-filled by GitHub on every PR |
 | `CLAUDE.md.section` | Appended to the target repo's CLAUDE.md — makes Claude Code fill the PR template with real content and run the loop unprompted after opening any PR |
 | `setup.sh` | One-shot installer: workflows for the legs you pick + fix-loop skill + CLAUDE.md wiring, prints the auth checklist |
