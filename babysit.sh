@@ -25,8 +25,9 @@ SCOPE="authored by me (--author @me)"
 
 PROMPT="Read .github/ai-review-loop.md fully and run its sweep mode over this repository's open pull requests ${SCOPE}. Nothing actionable = exit with one quiet line."
 
-# AI_CLI picks the agent: claude (default) or codex. Any other value is executed
-# verbatim with the prompt appended — bring your own headless agent.
+# AI_CLI picks the agent. claude (default) is the supported, live-tested path.
+# codex is wired but has less mileage — verify one sweep manually before cron.
+# Any other value is executed verbatim with the prompt appended: unsupported, no promises.
 AI_CLI="${AI_CLI:-claude}"
 case "$AI_CLI" in
   claude)

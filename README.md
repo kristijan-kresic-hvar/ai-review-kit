@@ -156,22 +156,21 @@ A human hears from it in exactly three cases: reviewer-consensus disagreement, r
 cap (3) with an open P0/P1, or a fix no runnable check can verify. Plus the merge
 click — always human. **It never merges.**
 
-### Bring your own agent — Claude Code not required on the dev machine
+### Which coding agent? Claude Code is the supported path
 
 The reviewers are CI-side and fixed (Claude + Codex review your PR no matter what you
-code with). Only three pieces touch the developer's machine, and all three are
-agent-neutral:
+code with). On the developer's machine:
 
-- **The playbook** — `.github/ai-review-loop.md` is ONE canonical, plain-markdown
-  loop any capable agent can follow. Claude Code reaches it through the installed
-  skill shim; **Codex CLI, Gemini, Cursor and other AGENTS.md-reading agents** reach
-  it through the `## Pull request workflow (all agents)` section of AGENTS.md; for
-  anything else, tell your agent: *"read .github/ai-review-loop.md and follow it."*
-- **The auto-run wiring** — CLAUDE.md (Claude Code) and AGENTS.md (everyone else)
-  carry the same directive: fill the PR template truthfully, fire the trigger, run
-  the loop.
-- **The babysitter** — `AI_CLI=claude` (default) or `AI_CLI=codex` picks the headless
-  runner; any other value runs verbatim with the prompt appended.
+- **Claude Code — supported and battle-tested.** Everything in this kit ran live on
+  real PRs from Claude Code. If you're on the company standard, stop reading here.
+- **Codex CLI — wired, works via AGENTS.md.** The `## Pull request workflow (all
+  agents)` section routes it to the same canonical playbook
+  (`.github/ai-review-loop.md`), and `AI_CLI=codex` switches the babysitter runner.
+  Functional but with less mileage than the Claude path.
+- **Anything else — no promises.** The playbook is one plain-markdown file any capable
+  agent can be pointed at (*"read .github/ai-review-loop.md and follow it"*), but
+  nothing beyond Claude and Codex has been exercised. If you get another agent running
+  the loop well, document it here.
 
 One identity requirement regardless of agent: the `gh` login that posts `@codex
 review` must belong to a Codex-connected human (Codex rejects CI-bot triggers —
