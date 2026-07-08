@@ -89,6 +89,10 @@ the status is visual — don't merge on red.
 - **Codex's clean signal is the head-naming comment** ("Didn't find any major issues" +
   the reviewed commit SHA). Its 👍 reaction is not trusted (no GitHub event fires for
   reactions, and it isn't head-scoped). Re-trigger with `@codex review` after a push.
+- **"Nothing new" re-review shape:** while old threads are still open, a re-review can
+  land as an empty COMMENTED review — no clean comment, so the gate stays red. Resolve
+  the threads per their dispositions, then fire one more `@codex review`; the clean pass
+  then posts the head-naming comment the gate verifies.
 - **merge-gate red + codex-review yellow = normal mid-review state.** The gate reports
   what is true *now*; the companion `codex-review` status shows in-flight. Red flips
   green by itself when the clean comment lands.

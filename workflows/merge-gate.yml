@@ -168,17 +168,36 @@ jobs:
           # section (openai/codex#25738) — NOT bare file presence. Teams use AGENTS.md as
           # a generic agent briefing without the Codex review app installed; file-presence
           # detection would hard-red the gate forever on such repos ("configured but never
-          # touched"). 404 = not configured; any other probe error fails closed (ERR trap).
+          # touched"). Probed on the default branch AND the PR head (PR #22 review): head
+          # too, or the PR that ADDS the section merges without Codex reviewing the
+          # enabling change; default too, or a PR that REMOVES the section disables its
+          # own gate. 404 = not configured on that ref; everything else fails closed (ERR
+          # trap): a non-base64 response (contents API returns encoding "none" past 1MB —
+          # and a raw-jq null content would even base64-decode "successfully" to garbage)
+          # must read as "couldn't check", never "not configured". The decode lands in a
+          # variable, not a pipe: grep -q on a pipeline exits at first match and SIGPIPEs
+          # the producer under pipefail, which the old trailing '|| true' swallowed into
+          # exactly the fail-open this function exists to prevent.
           codexCfg() {
-            local body
-            if body=$(gh api "repos/$REPO/contents/AGENTS.md" --jq .content 2>&1); then
-              printf %s "$body" | base64 -d | grep -Eq '^##[[:space:]]+Code Review Rules' && echo yes || true
-            else
-              case "$body" in
-                *"HTTP 404"*) : ;;
-                *) echo "AGENTS.md probe failed: $body" >&2; return 1 ;;
-              esac
-            fi
+            local ref resp enc b64 text
+            for ref in "" "?ref=$HEAD_SHA"; do
+              if resp=$(gh api "repos/$REPO/contents/AGENTS.md$ref" --jq '"\(.encoding) \(.content)"' 2>&1); then
+                enc=${resp%%[[:space:]]*}
+                b64=${resp#*[[:space:]]}
+                if [ "$enc" != "base64" ]; then
+                  echo "AGENTS.md probe: unexpected encoding '$enc' (ref '$ref')" >&2; return 1
+                fi
+                text=$(printf %s "$b64" | base64 -d)
+                if grep -Eq '^##[[:space:]]+Code Review Rules' <<<"$text"; then
+                  echo yes; return 0
+                fi
+              else
+                case "$resp" in
+                  *"HTTP 404"*) : ;;
+                  *) echo "AGENTS.md probe failed: $resp" >&2; return 1 ;;
+                esac
+              fi
+            done
           }
           CODEX_CFG=$(codexCfg)
 
