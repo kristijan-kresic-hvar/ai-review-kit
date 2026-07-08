@@ -114,15 +114,19 @@ the status is visual — don't merge on red.
 - Statuses are per-commit: every push resets both legs, and the gate dismisses Claude's
   stale approval from a superseded commit so the sidebar can't advertise an old ✓.
 
-## Automate the fix loop (optional but recommended)
+## The fix loop (the other half of the kit)
 
-The kit's CI side stops at "red until reviewed clean" — a companion skill drives the
-other half: triage findings with rigor, apply mechanical fixes, reply to and resolve
-threads, re-trigger reviewers, and sweep all your open PRs unattended. Install the
-**`pr-review-loop`** skill (in this repo: `optional/skills/pr-review-loop.md`, shipped
-via `ai-engineering install`) and say "run the review loop on PR <N>" or "babysit my
-PRs". It never merges and only auto-applies mechanical fixes — behavior-changing fixes
-are proposed, not pushed.
+The CI side stops at "red until reviewed clean" — the **`pr-review-loop`** skill drives
+the rest, autonomously by design: triages findings with rigor (verifying each against
+the code, pushing back on wrong ones), applies valid fixes gated by verification —
+including behavior-changing ones — replies to and resolves every thread, re-triggers
+reviewers and confirms they ran, and sweeps all your open PRs unattended ("babysit my
+PRs"). A human hears from it on exactly three escalations (reviewer-consensus
+disagreement, round cap with an open P0/P1, unverifiable fix) — and the merge click,
+which is always human. It never merges.
+
+Install it like every other skill (`ai-engineering install`; source:
+`optional/skills/pr-review-loop.md`), then: "run the review loop on PR <N>".
 
 ## Files
 
