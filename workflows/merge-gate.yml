@@ -1,7 +1,6 @@
 # merge-gate — stamps a commit status (context: "merge-gate") on the PR head, green ONLY
 # when every APPLICABLE AI reviewer is clean on the CURRENT head. A leg applies when its
-# reviewer is configured OR has activity on the PR (see the local hook + address-pr-review
-# for the normative signal map):
+# reviewer is configured OR has activity on the PR:
 #   - Claude: a review by claude[bot], state APPROVED, on the head SHA. Waived (with a
 #     note) only when the PR's ONLY changes are workflow files — the review action skips
 #     PRs editing code-review.yml, but a code+workflow bundle must still be reviewed.
@@ -10,8 +9,8 @@
 #     weak hint only — no GitHub event fires for reactions, so it can never flip the
 #     status by itself; the comment is authoritative.)
 # NOTE: on GitHub Free private repos this status is VISUAL — branch protection (which
-# hard-blocks the merge button) needs a paid plan or a public repo. The local
-# ~/.claude/hooks/merge-gate.mjs hook is the hard gate for agent-driven merges.
+# hard-blocks the merge button) needs a paid plan or a public repo. Where available,
+# require the "merge-gate" status check via Rulesets so red actually blocks the button.
 name: merge-gate
 
 on:
@@ -77,8 +76,8 @@ jobs:
           PR_NUM: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          # Staleness is judged against the LIVE head, not the event's payload SHA (P1s,
-          # PR #20 rounds 2-3): with no concurrency group a delayed run for an old push
+          # Staleness is judged against the LIVE head, not the event's payload SHA (a
+          # class of bug caught in live review): with no concurrency group a delayed run
           # can execute after newer pushes — comparing against its stale payload SHA would
           # dismiss Claude's VALID approval on the current head. Against the live head the
           # dismissal is correct by construction, however delayed this run is: it can only
@@ -124,7 +123,7 @@ jobs:
           trap 'stamp failure "gate errored — treat as NOT approved"' ERR
           # Success may never overwrite a FAILURE stamped by a run that started after us —
           # without a concurrency group an older run can finish last, and its data predates
-          # whatever the newer run saw (P1s from PR #20 review, rounds 1-2). Timestamps are
+          # whatever the newer run saw (caught in live adversarial review). Timestamps are
           # second-granularity ISO-8601 UTC (lexicographic compare), so an EQUAL timestamp
           # is treated as unsafe too (>= via "not <") — a same-second tie costs at most a
           # skipped green the next event repairs. The freshness lookup is deliberately NOT
@@ -168,7 +167,7 @@ jobs:
           # section (openai/codex#25738) — NOT bare file presence. Teams use AGENTS.md as
           # a generic agent briefing without the Codex review app installed; file-presence
           # detection would hard-red the gate forever on such repos ("configured but never
-          # touched"). Probed on the default branch AND the PR head (PR #22 review): head
+          # touched"). Probed on the default branch AND the PR head (live finding): head
           # too, or the PR that ADDS the section merges without Codex reviewing the
           # enabling change; default too, or a PR that REMOVES the section disables its
           # own gate. 404 = not configured on that ref; everything else fails closed (ERR

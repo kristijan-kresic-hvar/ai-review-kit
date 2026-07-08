@@ -2,9 +2,10 @@
 # SETUP (2 steps): 1) copy this file to .github/workflows/code-review.yml  2) add the repo secret CLAUDE_CODE_OAUTH_TOKEN
 #                  (get the token via Claude Code `/install-github-app`, then `gh secret set CLAUDE_CODE_OAUTH_TOKEN`).
 #
-# SAFETY: assumes a PRIVATE, single-maintainer repo. Before public or multi-collaborator use:
-#   - add `if: github.event.pull_request.head.repo.full_name == github.repository` to the job (skip fork PRs), and
-#   - treat the PR branch's CLAUDE.md as attacker-controlled — review against the base branch's conventions.
+# SAFETY: fork PRs are skipped by the job-level `if` (secrets aren't exposed to forks anyway;
+# a fork PR would only burn a run that can't post). For repos accepting outside contributions,
+# also treat the PR branch's CLAUDE.md as untrusted input — review against the base branch's
+# conventions if that ever becomes a concern.
 #
 # KNOWN GOTCHA: a PR that edits THIS file is skipped by the action's workflow-validation guard
 # ("must match the version on the default branch") — it runs green with no review. Verify changes
@@ -28,6 +29,9 @@ permissions:
 
 jobs:
   claude-review:
+    # Same-repo branches only: fork PRs can't read the token secret, so the run could
+    # never post a review — skip instead of failing green-with-nothing.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

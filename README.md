@@ -1,5 +1,8 @@
 # ai-review-kit
 
+> **⚠️ GitHub only (for now).** Everything here runs on GitHub Actions + GitHub apps.
+> Bitbucket and GitLab repos cannot use this kit — nothing in it will run there.
+
 Two independent AI reviewers on every pull request, plus a merge-gate status that only
 goes green when every reviewer **you actually have** is clean on the current head.
 
@@ -11,7 +14,17 @@ goes green when every reviewer **you actually have** is clean on the current hea
   repo has and gates on exactly those. One reviewer is fine. Zero reviewers = gate stays
   out of the way.
 
-GitHub-only (Actions + GitHub apps). Bitbucket/GitLab repos cannot use this.
+## Prerequisites
+
+- A **GitHub** repo (Actions enabled — the default).
+- **Claude leg:** a Claude subscription with Claude Code access (the repo owner runs
+  `claude setup-token` once per repo). Reviewers/teammates need nothing.
+- **Codex leg:** a ChatGPT plan that includes Codex, with the Codex GitHub app
+  installed on the repo.
+- `gh` CLI locally only for the setup convenience steps — the workflows themselves
+  need no local tooling.
+
+Each leg is optional and independent — install what your repo's accounts support.
 
 ## Degradation matrix (the contract)
 
