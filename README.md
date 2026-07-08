@@ -114,6 +114,16 @@ the status is visual — don't merge on red.
 - Statuses are per-commit: every push resets both legs, and the gate dismisses Claude's
   stale approval from a superseded commit so the sidebar can't advertise an old ✓.
 
+## Automate the fix loop (optional but recommended)
+
+The kit's CI side stops at "red until reviewed clean" — a companion skill drives the
+other half: triage findings with rigor, apply mechanical fixes, reply to and resolve
+threads, re-trigger reviewers, and sweep all your open PRs unattended. Install the
+**`pr-review-loop`** skill (in this repo: `optional/skills/pr-review-loop.md`, shipped
+via `ai-engineering install`) and say "run the review loop on PR <N>" or "babysit my
+PRs". It never merges and only auto-applies mechanical fixes — behavior-changing fixes
+are proposed, not pushed.
+
 ## Files
 
 | File | What |
