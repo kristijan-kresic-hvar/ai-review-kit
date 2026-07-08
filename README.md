@@ -47,15 +47,17 @@ one reviews the other's blind spots.
 
 ## Setup
 
-From your repo root (kit cloned as a sibling directory):
+From the **target repo's root**, pointing at wherever this kit lives on your disk:
 
 ```bash
-../ai-review-kit/setup.sh            # both legs
-../ai-review-kit/setup.sh --claude   # Claude only
-../ai-review-kit/setup.sh --codex    # Codex only
+path/to/ai-review-kit/setup.sh            # both legs
+path/to/ai-review-kit/setup.sh --claude   # Claude only
+path/to/ai-review-kit/setup.sh --codex    # Codex only
 ```
 
-Or copy by hand — the script only copies files and prints the checklist below.
+Or skip the script and copy by hand — it only copies the files for the legs you pick
+and prints the auth checklist below. Three files at most: two workflows into
+`.github/workflows/`, `AGENTS.md` at the repo root.
 
 ### Claude leg (per repo, once)
 
