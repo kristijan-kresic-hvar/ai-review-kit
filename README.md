@@ -32,6 +32,9 @@ Exceptions surface themselves; nothing else asks for attention.
   need no local tooling.
 
 Each leg is optional and independent — install what your repo's accounts support.
+Cost: Claude reviews bill the repo owner's Claude subscription, Codex the ChatGPT plan;
+budget roughly 2 runs per reviewer per fix round (the loop batches all of a round's
+fixes into one push to keep it there).
 
 ## Degradation matrix (the contract)
 
@@ -63,8 +66,9 @@ path/to/ai-review-kit/setup.sh --codex    # Codex only
 ```
 
 Or skip the script and copy by hand — it only copies files and prints the auth
-checklist below. Five pieces at most: two workflows into `.github/workflows/`,
-`AGENTS.md` at the repo root, `skills/pr-review-loop.md` to
+checklist below. Six pieces at most: two workflows into `.github/workflows/`,
+`AGENTS.md` at the repo root, `pull_request_template.md` to
+`.github/pull_request_template.md`, `skills/pr-review-loop.md` to
 `.claude/skills/pr-review-loop/SKILL.md` (the fix loop), and `CLAUDE.md.section`
 appended to the repo's `CLAUDE.md` (the auto-run wiring).
 
@@ -75,9 +79,10 @@ appended to the repo's `CLAUDE.md` (the auto-run wiring).
    - In Claude Code, run `/install-github-app` (guides app install + secret), **or**
    - `claude setup-token`, then `gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo <owner>/<repo>`.
    One token per repo (the repo owner's Claude subscription). Reviewers need nothing.
-3. Optional: tune the review prompt in the workflow for the repo's stack. If the repo
-   also runs Codex, tell Claude so in the prompt (own craftsmanship, skip deep
-   bug-hunting) — see the marked block in the file.
+3. No prompt tuning needed: the review prompt adapts itself — it reads the repo's
+   CLAUDE.md/AGENTS.md conventions, and when AGENTS.md carries the `## Code Review
+   Rules` section it automatically cedes deep bug-hunting to Codex and owns
+   craftsmanship (with no Codex, it covers both roles).
 
 ### Codex leg (per repo, once)
 
@@ -163,5 +168,6 @@ sentence the kit can't automate away).
 | `workflows/merge-gate.yml` | Adaptive two-leg merge gate (commit status) |
 | `AGENTS.md.example` | Codex adversarial briefing with the `## Code Review Rules` contract section |
 | `skills/pr-review-loop.md` | The autonomous fix loop — installed per-repo as a project-local Claude Code skill |
-| `CLAUDE.md.section` | Appended to the target repo's CLAUDE.md — makes Claude Code run the loop unprompted after opening any PR |
+| `pull_request_template.md` | Installed as `.github/pull_request_template.md` — review-optimized PR structure (Summary / Scope / Deliberate trade-offs / Verification), pre-filled by GitHub on every PR |
+| `CLAUDE.md.section` | Appended to the target repo's CLAUDE.md — makes Claude Code fill the PR template with real content and run the loop unprompted after opening any PR |
 | `setup.sh` | One-shot installer: workflows for the legs you pick + fix-loop skill + CLAUDE.md wiring, prints the auth checklist |

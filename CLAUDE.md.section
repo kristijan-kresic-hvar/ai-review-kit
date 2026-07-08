@@ -1,6 +1,11 @@
 
 ## AI review loop (ai-review-kit — auto-run)
 
+When CREATING a pull request in this repo, fill every section of the PR template
+(`.github/pull_request_template.md`) with real content — actual verification results,
+real trade-offs with their reasoning. Reviewers treat stated trade-offs as intentional
+and verify Verification claims; empty or false sections make reviews worse, not softer.
+
 After opening ANY pull request in this repo, immediately and without being asked:
 
 1. Fire the Codex review trigger: `gh pr comment <N> --body "@codex review"` (skip only

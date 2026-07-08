@@ -54,6 +54,12 @@ jobs:
             Adapt to the repo:
             - If a CLAUDE.md / AGENTS.md / CONTRIBUTING.md exists, review against its conventions FIRST.
             - Otherwise apply strong general best practices for the repo's language/framework.
+            - Role split (decide it yourself): check AGENTS.md at the repo root. If it contains a
+              '## Code Review Rules' section, an adversarial reviewer (Codex) also runs on this PR
+              and owns deep bug-hunting — P0/P1 logic bugs, exploit-style edge cases. You own
+              craftsmanship: conventions, maintainability, tests, data safety, and correctness
+              issues you see directly — do not duplicate a full adversarial pass. If there is no
+              such section, you are the ONLY reviewer: cover both roles.
             - Read the PR description's Scope / Deliberate trade-offs / Verification sections (when present)
               as author-supplied context: a trade-off stated there with its reasoning is intentional — flag it
               only if the reasoning is wrong or genuinely unsafe, not merely because a fuller version exists.

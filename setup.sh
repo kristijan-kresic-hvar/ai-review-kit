@@ -27,6 +27,14 @@ mkdir -p .claude/skills/pr-review-loop
 cp "$KIT/skills/pr-review-loop.md" .claude/skills/pr-review-loop/SKILL.md
 echo "installed .claude/skills/pr-review-loop/SKILL.md (autonomous fix loop)"
 
+# Review-optimized PR structure for everyone — GitHub pre-fills it on every new PR.
+if [ -f .github/pull_request_template.md ]; then
+  echo ".github/pull_request_template.md exists — left as is"
+else
+  cp "$KIT/pull_request_template.md" .github/pull_request_template.md
+  echo "installed .github/pull_request_template.md (review-optimized PR structure)"
+fi
+
 # Wire CLAUDE.md so Claude Code runs the loop UNPROMPTED after opening any PR —
 # this is what makes the kit hands-off end to end, not a skill someone must invoke.
 if [ -f CLAUDE.md ] && grep -qF '## AI review loop (ai-review-kit' CLAUDE.md; then
