@@ -21,11 +21,14 @@ mkdir -p .github/workflows
 cp "$KIT/workflows/merge-gate.yml" .github/workflows/merge-gate.yml
 echo "installed .github/workflows/merge-gate.yml"
 
-# The fix loop ships with the kit — installed as a project-local Claude Code skill, so
-# anyone opening this repo with Claude Code has the loop with no separate install.
+# The fix loop ships with the kit. ONE canonical agent-neutral playbook, plus a thin
+# Claude Code skill shim pointing at it — Codex CLI and other AGENTS.md-reading agents
+# get routed by the 'Pull request workflow' section of AGENTS.md instead.
+cp "$KIT/ai-review-loop.md" .github/ai-review-loop.md
+echo "installed .github/ai-review-loop.md (canonical fix-loop playbook, any agent)"
 mkdir -p .claude/skills/pr-review-loop
 cp "$KIT/skills/pr-review-loop.md" .claude/skills/pr-review-loop/SKILL.md
-echo "installed .claude/skills/pr-review-loop/SKILL.md (autonomous fix loop)"
+echo "installed .claude/skills/pr-review-loop/SKILL.md (Claude Code shim -> playbook)"
 
 # The babysitter — unattended sweep runner for cron/manual use, so PRs opened OUTSIDE
 # Claude Code (web UI, plain terminal) still get the loop.
@@ -63,6 +66,11 @@ if [ "$CODEX" = 1 ]; then
       echo "NOTE: AGENTS.md exists but lacks '## Code Review Rules' — the gate will NOT"
       echo "      treat this repo as Codex-enabled until you add that section."
       echo "      Template: $KIT/AGENTS.md.example"
+    fi
+    if ! grep -Eq '^##[[:space:]]+Pull request workflow' AGENTS.md; then
+      echo "NOTE: AGENTS.md lacks the '## Pull request workflow (all agents)' section —"
+      echo "      copy it from $KIT/AGENTS.md.example so non-Claude agents (Codex CLI"
+      echo "      etc.) also auto-run the loop after opening PRs."
     fi
   else
     cp "$KIT/AGENTS.md.example" AGENTS.md

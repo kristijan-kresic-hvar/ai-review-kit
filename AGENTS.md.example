@@ -1,8 +1,24 @@
 # AGENTS.md
 
-Guidance for OpenAI Codex agents on this repo. Engineering conventions (stack, structure,
+Guidance for coding agents on this repo. Engineering conventions (stack, structure,
 commit rules) live in `CLAUDE.md` / `CONTRIBUTING.md` — read those for anything not
 covered here.
+
+## Pull request workflow (all agents)
+
+When CREATING a pull request: fill every section of `.github/pull_request_template.md`
+with real content — actual verification results, real trade-offs with reasoning. The AI
+reviewers treat stated trade-offs as intentional and verify Verification claims.
+
+After OPENING a pull request, immediately and without being asked: fire the Codex
+review trigger (`gh pr comment <N> --body "@codex review"` — skip only if a Codex
+review/ack already exists for this head), then follow `.github/ai-review-loop.md` to
+convergence. It is autonomous by design — verified fixes, thread replies/resolution,
+re-triggers; only its three escalation triggers stop for a human, and it NEVER merges.
+
+At the START of a session in this repo: check your open PRs here for unhandled review
+findings (`gh search prs --author "@me" --state open`) and run the loop's sweep if
+anything is actionable. Quiet when idle.
 
 ## Code Review Rules
 

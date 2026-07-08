@@ -18,10 +18,24 @@
 # and the skill's hard rules forbid merging and pushing to the default branch either
 # way; the merge-gate status stays the human's merge signal.
 set -euo pipefail
-[ -f .claude/skills/pr-review-loop/SKILL.md ] || { echo "run from a repo with ai-review-kit installed"; exit 1; }
+[ -f .github/ai-review-loop.md ] || { echo "run from a repo with ai-review-kit installed"; exit 1; }
 
 SCOPE="authored by me (--author @me)"
 [ "${1:-}" = "--all" ] && SCOPE="by ANY author"
 
-exec claude -p "Run the pr-review-loop skill in sweep mode over this repository's open pull requests ${SCOPE}. Nothing actionable = exit with one quiet line." \
-  --allowedTools "Skill,Read,Glob,Grep,Edit,Write,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr checks:*),Bash(gh api:*),Bash(gh search:*),Bash(gh workflow run:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git worktree:*),Bash(git checkout:*),Bash(git fetch:*)"
+PROMPT="Read .github/ai-review-loop.md fully and run its sweep mode over this repository's open pull requests ${SCOPE}. Nothing actionable = exit with one quiet line."
+
+# AI_CLI picks the agent: claude (default) or codex. Any other value is executed
+# verbatim with the prompt appended — bring your own headless agent.
+AI_CLI="${AI_CLI:-claude}"
+case "$AI_CLI" in
+  claude)
+    exec claude -p "$PROMPT" \
+      --allowedTools "Skill,Read,Glob,Grep,Edit,Write,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr checks:*),Bash(gh api:*),Bash(gh search:*),Bash(gh workflow run:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git worktree:*),Bash(git checkout:*),Bash(git fetch:*)" ;;
+  codex)
+    # --full-auto: workspace-write + on-request network; make sure your Codex config
+    # allows gh/git in this repo or the sweep stalls on approvals.
+    exec codex exec --full-auto "$PROMPT" ;;
+  *)
+    exec $AI_CLI "$PROMPT" ;;
+esac

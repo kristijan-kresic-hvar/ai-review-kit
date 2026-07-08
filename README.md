@@ -66,12 +66,14 @@ path/to/ai-review-kit/setup.sh --codex    # Codex only
 ```
 
 Or skip the script and copy by hand — it only copies files and prints the auth
-checklist below. Seven pieces at most: two workflows into `.github/workflows/`,
+checklist below. Eight pieces at most: two workflows into `.github/workflows/`,
 `AGENTS.md` at the repo root, `pull_request_template.md` to
-`.github/pull_request_template.md`, `skills/pr-review-loop.md` to
-`.claude/skills/pr-review-loop/SKILL.md` (the fix loop), `babysit.sh` to
+`.github/pull_request_template.md`, `ai-review-loop.md` to
+`.github/ai-review-loop.md` (the canonical playbook), `skills/pr-review-loop.md` to
+`.claude/skills/pr-review-loop/SKILL.md` (Claude shim), `babysit.sh` to
 `.claude/ai-review-babysit.sh` (the unattended runner), and `CLAUDE.md.section`
-appended to the repo's `CLAUDE.md` (the auto-run wiring).
+appended to the repo's `CLAUDE.md` (Claude auto-run wiring; AGENTS.md carries the
+same for other agents).
 
 ### Claude leg (per repo, once)
 
@@ -154,6 +156,27 @@ A human hears from it in exactly three cases: reviewer-consensus disagreement, r
 cap (3) with an open P0/P1, or a fix no runnable check can verify. Plus the merge
 click — always human. **It never merges.**
 
+### Bring your own agent — Claude Code not required on the dev machine
+
+The reviewers are CI-side and fixed (Claude + Codex review your PR no matter what you
+code with). Only three pieces touch the developer's machine, and all three are
+agent-neutral:
+
+- **The playbook** — `.github/ai-review-loop.md` is ONE canonical, plain-markdown
+  loop any capable agent can follow. Claude Code reaches it through the installed
+  skill shim; **Codex CLI, Gemini, Cursor and other AGENTS.md-reading agents** reach
+  it through the `## Pull request workflow (all agents)` section of AGENTS.md; for
+  anything else, tell your agent: *"read .github/ai-review-loop.md and follow it."*
+- **The auto-run wiring** — CLAUDE.md (Claude Code) and AGENTS.md (everyone else)
+  carry the same directive: fill the PR template truthfully, fire the trigger, run
+  the loop.
+- **The babysitter** — `AI_CLI=claude` (default) or `AI_CLI=codex` picks the headless
+  runner; any other value runs verbatim with the prompt appended.
+
+One identity requirement regardless of agent: the `gh` login that posts `@codex
+review` must belong to a Codex-connected human (Codex rejects CI-bot triggers —
+tested live). A dev driving Codex CLI has that by definition.
+
 ### The babysitter — coverage for PRs opened ANY way
 
 Claude's review fires on every PR regardless of origin (Actions). Codex is
@@ -190,8 +213,9 @@ maintainer (or one always-on machine) can cover a whole team.
 | `workflows/code-review.yml` | Claude reviewer + posted-review verification step |
 | `workflows/merge-gate.yml` | Adaptive two-leg merge gate (commit status) |
 | `AGENTS.md.example` | Codex adversarial briefing with the `## Code Review Rules` contract section |
-| `skills/pr-review-loop.md` | The autonomous fix loop — installed per-repo as a project-local Claude Code skill |
-| `babysit.sh` | Installed as `.claude/ai-review-babysit.sh` — headless sweep runner for cron/manual use (`--all` = whole team's PRs) |
+| `ai-review-loop.md` | THE canonical fix-loop playbook — installed as `.github/ai-review-loop.md`, followed by any coding agent |
+| `skills/pr-review-loop.md` | Thin Claude Code skill shim — routes Claude to the canonical playbook |
+| `babysit.sh` | Installed as `.claude/ai-review-babysit.sh` — headless sweep runner for cron/manual use (`AI_CLI=claude\|codex\|<cmd>`, `--all` = whole team's PRs) |
 | `pull_request_template.md` | Installed as `.github/pull_request_template.md` — review-optimized PR structure (Summary / Scope / Deliberate trade-offs / Verification), pre-filled by GitHub on every PR |
 | `CLAUDE.md.section` | Appended to the target repo's CLAUDE.md — makes Claude Code fill the PR template with real content and run the loop unprompted after opening any PR |
 | `setup.sh` | One-shot installer: workflows for the legs you pick + fix-loop skill + CLAUDE.md wiring, prints the auth checklist |
