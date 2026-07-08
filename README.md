@@ -3,8 +3,15 @@
 > **⚠️ GitHub only (for now).** Everything here runs on GitHub Actions + GitHub apps.
 > Bitbucket and GitLab repos cannot use this kit — nothing in it will run there.
 
-Two independent AI reviewers on every pull request, plus a merge-gate status that only
-goes green when every reviewer **you actually have** is clean on the current head.
+Two independent AI reviewers on every pull request, an autonomous fix loop that drives
+their findings to convergence, and a merge-gate status that only goes green when every
+reviewer **you actually have** is clean on the current head.
+
+**The flow, once installed:** work on a feature, open a PR — reviewers fire, the loop
+triages and fixes findings, resolves threads, re-reviews, and the gate flips green. The
+human's entire job on a clean PR is the merge click. When the PR is opened from Claude
+Code, even the loop starts unprompted (`setup.sh` wires the repo's CLAUDE.md for it).
+Exceptions surface themselves; nothing else asks for attention.
 
 - **Claude** (craftsmanship): conventions, maintainability, a11y, quality — via
   [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action).
@@ -56,9 +63,10 @@ path/to/ai-review-kit/setup.sh --codex    # Codex only
 ```
 
 Or skip the script and copy by hand — it only copies files and prints the auth
-checklist below. Four files at most: two workflows into `.github/workflows/`,
-`AGENTS.md` at the repo root, and `skills/pr-review-loop.md` to
-`.claude/skills/pr-review-loop/SKILL.md` (the fix loop).
+checklist below. Five pieces at most: two workflows into `.github/workflows/`,
+`AGENTS.md` at the repo root, `skills/pr-review-loop.md` to
+`.claude/skills/pr-review-loop/SKILL.md` (the fix loop), and `CLAUDE.md.section`
+appended to the repo's `CLAUDE.md` (the auto-run wiring).
 
 ### Claude leg (per repo, once)
 
@@ -78,9 +86,13 @@ checklist below. Four files at most: two workflows into `.github/workflows/`,
 2. Copy `AGENTS.md.example` to `AGENTS.md` at the repo root and adapt. **Keep the
    `## Code Review Rules` heading exactly** — it's both what Codex reads
    (openai/codex#25738) and what the merge-gate keys on.
-3. Reviews run on PR-open / draft→ready if the account's Auto review toggle is on;
-   otherwise trigger per PR with a comment: `@codex review`. The bot acks the trigger
-   with a 👀 reaction within ~1 min; the review lands in ~5–15 min.
+3. **Turn the account's Auto review toggle ON** (same settings page) — reviews then
+   fire on PR-open / draft→ready with no comment needed, which is the hands-off
+   default this kit is built for. Without it, each PR needs a `@codex review` comment
+   (the loop posts it for you when the PR comes from Claude Code). The bot acks
+   triggers with a 👀 reaction within ~1 min; reviews land in ~5–15 min. One quirk:
+   an auto-review **clean** pass may signal only a 👍 reaction — not the head-named
+   comment the gate verifies; the loop converts it with a single `@codex review`.
 
 ### Merge gate (per repo, once)
 
@@ -144,4 +156,5 @@ click — always human. **It never merges.**
 | `workflows/merge-gate.yml` | Adaptive two-leg merge gate (commit status) |
 | `AGENTS.md.example` | Codex adversarial briefing with the `## Code Review Rules` contract section |
 | `skills/pr-review-loop.md` | The autonomous fix loop — installed per-repo as a project-local Claude Code skill |
-| `setup.sh` | Copies the files for the legs you pick + the fix-loop skill, prints the auth checklist |
+| `CLAUDE.md.section` | Appended to the target repo's CLAUDE.md — makes Claude Code run the loop unprompted after opening any PR |
+| `setup.sh` | One-shot installer: workflows for the legs you pick + fix-loop skill + CLAUDE.md wiring, prints the auth checklist |

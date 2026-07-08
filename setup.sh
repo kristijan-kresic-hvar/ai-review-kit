@@ -27,6 +27,15 @@ mkdir -p .claude/skills/pr-review-loop
 cp "$KIT/skills/pr-review-loop.md" .claude/skills/pr-review-loop/SKILL.md
 echo "installed .claude/skills/pr-review-loop/SKILL.md (autonomous fix loop)"
 
+# Wire CLAUDE.md so Claude Code runs the loop UNPROMPTED after opening any PR —
+# this is what makes the kit hands-off end to end, not a skill someone must invoke.
+if [ -f CLAUDE.md ] && grep -qF '## AI review loop (ai-review-kit' CLAUDE.md; then
+  echo "CLAUDE.md already wired for the review loop — left as is"
+else
+  cat "$KIT/CLAUDE.md.section" >> CLAUDE.md
+  echo "wired CLAUDE.md — the loop auto-runs after every PR opened from Claude Code"
+fi
+
 if [ "$CLAUDE" = 1 ]; then
   cp "$KIT/workflows/code-review.yml" .github/workflows/code-review.yml
   echo "installed .github/workflows/code-review.yml"

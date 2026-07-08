@@ -1,0 +1,16 @@
+
+## AI review loop (ai-review-kit — auto-run)
+
+After opening ANY pull request in this repo, immediately and without being asked:
+
+1. Fire the Codex review trigger: `gh pr comment <N> --body "@codex review"` (skip only
+   if a Codex review/ack for this head already exists — e.g. the account's auto-review
+   fired on PR open).
+2. Drive the `pr-review-loop` skill (project-local, `.claude/skills/pr-review-loop/`) to
+   convergence: triage → verified fixes → reply/resolve threads → re-trigger reviewers →
+   repeat. It is autonomous by design; only its three escalation triggers stop for a
+   human, and it NEVER merges.
+3. Report the PR's end state in one line: converged (ready for human merge) or escalated
+   (what and why). The human's job is the merge click.
+
+Installed by ai-review-kit's setup.sh — keep this section when editing CLAUDE.md.
