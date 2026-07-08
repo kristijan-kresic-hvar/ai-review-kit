@@ -85,7 +85,8 @@ fi
 if [ "$CODEX" = 1 ]; then
   echo "[codex]  install the Codex GitHub app + enable code review for this repo:"
   echo "         ChatGPT -> Settings -> Codex -> Code review"
-  echo "         trigger per PR with a comment: @codex review (auto-review optional)"
+  echo "         keep the account's Auto review toggle OFF (trigger-only by design:"
+  echo "         one deterministic review per head — the loop posts @codex review)"
 fi
 echo "[gate]   optional but recommended: require status check 'merge-gate' on the"
 echo "         default branch (Settings -> Rulesets; private repos need Pro/Team)."

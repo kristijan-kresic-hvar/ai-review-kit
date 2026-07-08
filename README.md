@@ -92,13 +92,13 @@ appended to the repo's `CLAUDE.md` (the auto-run wiring).
 2. Copy `AGENTS.md.example` to `AGENTS.md` at the repo root and adapt. **Keep the
    `## Code Review Rules` heading exactly** — it's both what Codex reads
    (openai/codex#25738) and what the merge-gate keys on.
-3. **Turn the account's Auto review toggle ON** (same settings page) — reviews then
-   fire on PR-open / draft→ready with no comment needed, which is the hands-off
-   default this kit is built for. Without it, each PR needs a `@codex review` comment
-   (the loop posts it for you when the PR comes from Claude Code). The bot acks
-   triggers with a 👀 reaction within ~1 min; reviews land in ~5–15 min. One quirk:
-   an auto-review **clean** pass may signal only a 👍 reaction — not the head-named
-   comment the gate verifies; the loop converts it with a single `@codex review`.
+3. **Leave the account's Auto review toggle OFF** (deliberate, learned live): with it
+   ON, every Claude-Code-opened PR gets TWO reviews per head (the auto-run plus the
+   loop's trigger), and an auto-review **clean** pass signals only a 👍 reaction — not
+   the head-named comment the gate verifies — so even clean PRs need a second run to
+   convert it. Trigger-only is one deterministic review per head: the loop (or the
+   babysitter) posts `@codex review` for you. The bot acks triggers with a 👀 reaction
+   within ~1 min; reviews land in ~5–15 min.
 
 ### Merge gate (per repo, once)
 
@@ -156,9 +156,9 @@ click — always human. **It never merges.**
 
 ### The babysitter — coverage for PRs opened ANY way
 
-The reviews themselves fire on every PR regardless of how it was opened (Claude via
-Actions, Codex via the Auto review toggle). The loop needs an agent, and it gets one
-through three layers:
+Claude's review fires on every PR regardless of origin (Actions). Codex is
+trigger-only by design (Auto review stays OFF — see Codex leg setup), so its review
+arrives with the loop, whoever starts it:
 
 | PR opened via | Who runs the loop | Latency |
 |---|---|---|
