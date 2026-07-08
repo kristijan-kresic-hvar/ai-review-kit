@@ -157,8 +157,15 @@ click — always human. **It never merges.**
 ### The babysitter — coverage for PRs opened ANY way
 
 Claude's review fires on every PR regardless of origin (Actions). Codex is
-trigger-only by design (Auto review stays OFF — see Codex leg setup), so its review
-arrives with the loop, whoever starts it:
+trigger-only by design (Auto review stays OFF — see Codex leg setup), and a trigger
+**must be authored by a Codex-connected human account** — tested live: a workflow-posted
+`@codex review` from `github-actions[bot]` gets no review, only "To use Codex here,
+create a Codex account and connect to github." CI therefore cannot fire Codex; the
+loop and the babysitter (running under each developer's own `gh` identity) are the
+trigger mechanism. (Escape hatch if a team wants true CI triggering: a dedicated
+machine user with its own ChatGPT/Codex seat + a PAT secret — costs a seat, works.)
+
+So the loop's kickoff is the only origin-dependent part:
 
 | PR opened via | Who runs the loop | Latency |
 |---|---|---|
