@@ -55,9 +55,10 @@ path/to/ai-review-kit/setup.sh --claude   # Claude only
 path/to/ai-review-kit/setup.sh --codex    # Codex only
 ```
 
-Or skip the script and copy by hand — it only copies the files for the legs you pick
-and prints the auth checklist below. Three files at most: two workflows into
-`.github/workflows/`, `AGENTS.md` at the repo root.
+Or skip the script and copy by hand — it only copies files and prints the auth
+checklist below. Four files at most: two workflows into `.github/workflows/`,
+`AGENTS.md` at the repo root, and `skills/pr-review-loop.md` to
+`.claude/skills/pr-review-loop/SKILL.md` (the fix loop).
 
 ### Claude leg (per repo, once)
 
@@ -114,19 +115,26 @@ the status is visual — don't merge on red.
 - Statuses are per-commit: every push resets both legs, and the gate dismisses Claude's
   stale approval from a superseded commit so the sidebar can't advertise an old ✓.
 
-## The fix loop (the other half of the kit)
+## The fix loop (ships with the kit — no separate install)
 
-The CI side stops at "red until reviewed clean" — the **`pr-review-loop`** skill drives
-the rest, autonomously by design: triages findings with rigor (verifying each against
-the code, pushing back on wrong ones), applies valid fixes gated by verification —
-including behavior-changing ones — replies to and resolves every thread, re-triggers
-reviewers and confirms they ran, and sweeps all your open PRs unattended ("babysit my
-PRs"). A human hears from it on exactly three escalations (reviewer-consensus
-disagreement, round cap with an open P0/P1, unverifiable fix) — and the merge click,
-which is always human. It never merges.
+The CI side stops at "red until reviewed clean" — the **fix loop** drives the rest,
+autonomously by design. `setup.sh` installs it into the target repo as a project-local
+Claude Code skill (`.claude/skills/pr-review-loop/SKILL.md`), so anyone who opens the
+repo with Claude Code has it immediately: say "run the review loop on PR <N>" or
+"babysit my PRs".
 
-Install it like every other skill (`ai-engineering install`; source:
-`optional/skills/pr-review-loop.md`), then: "run the review loop on PR <N>".
+What it does without asking: triages every finding against the actual code (pushing
+back on wrong ones — the adversarial reviewer produces some false positives, and blind
+agreement ships bugs), applies valid fixes gated by the repo's own verification —
+including behavior-changing ones; the reviewers' re-run on the push is the safety net —
+replies to and resolves every thread, re-triggers reviewers and confirms they actually
+ran, and sweeps all your open PRs unattended. Disputed findings settle by a reviewer
+consensus vote (the fresh re-review reads the diff, not the replies — it can't be
+lobbied), not by a human.
+
+A human hears from it in exactly three cases: reviewer-consensus disagreement, round
+cap (3) with an open P0/P1, or a fix no runnable check can verify. Plus the merge
+click — always human. **It never merges.**
 
 ## Files
 
@@ -135,4 +143,5 @@ Install it like every other skill (`ai-engineering install`; source:
 | `workflows/code-review.yml` | Claude reviewer + posted-review verification step |
 | `workflows/merge-gate.yml` | Adaptive two-leg merge gate (commit status) |
 | `AGENTS.md.example` | Codex adversarial briefing with the `## Code Review Rules` contract section |
-| `setup.sh` | Copies the files for the legs you pick, prints the auth checklist |
+| `skills/pr-review-loop.md` | The autonomous fix loop — installed per-repo as a project-local Claude Code skill |
+| `setup.sh` | Copies the files for the legs you pick + the fix-loop skill, prints the auth checklist |

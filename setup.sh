@@ -21,6 +21,12 @@ mkdir -p .github/workflows
 cp "$KIT/workflows/merge-gate.yml" .github/workflows/merge-gate.yml
 echo "installed .github/workflows/merge-gate.yml"
 
+# The fix loop ships with the kit — installed as a project-local Claude Code skill, so
+# anyone opening this repo with Claude Code has the loop with no separate install.
+mkdir -p .claude/skills/pr-review-loop
+cp "$KIT/skills/pr-review-loop.md" .claude/skills/pr-review-loop/SKILL.md
+echo "installed .claude/skills/pr-review-loop/SKILL.md (autonomous fix loop)"
+
 if [ "$CLAUDE" = 1 ]; then
   cp "$KIT/workflows/code-review.yml" .github/workflows/code-review.yml
   echo "installed .github/workflows/code-review.yml"
