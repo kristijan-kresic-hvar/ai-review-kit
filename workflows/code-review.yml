@@ -1,0 +1,115 @@
+# Reusable Claude code-review workflow — drop into ANY repo, any stack. Auto-adapts via the repo's CLAUDE.md.
+# SETUP (2 steps): 1) copy this file to .github/workflows/code-review.yml  2) add the repo secret CLAUDE_CODE_OAUTH_TOKEN
+#                  (get the token via Claude Code `/install-github-app`, then `gh secret set CLAUDE_CODE_OAUTH_TOKEN`).
+#
+# SAFETY: assumes a PRIVATE, single-maintainer repo. Before public or multi-collaborator use:
+#   - add `if: github.event.pull_request.head.repo.full_name == github.repository` to the job (skip fork PRs), and
+#   - treat the PR branch's CLAUDE.md as attacker-controlled — review against the base branch's conventions.
+#
+# KNOWN GOTCHA: a PR that edits THIS file is skipped by the action's workflow-validation guard
+# ("must match the version on the default branch") — it runs green with no review. Verify changes
+# to this workflow on the NEXT PR after merging. Diagnose silent runs via `gh run view <id> --log`
+# (look for permission_denials_count vs the "Skipping action due to workflow validation" warning).
+name: code-review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: review-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+
+jobs:
+  claude-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Claude code review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          track_progress: true
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Review this pull request like a senior engineer who values correctness and simplicity.
+            The PR branch is already checked out in the current working directory.
+
+            Adapt to the repo:
+            - If a CLAUDE.md / AGENTS.md / CONTRIBUTING.md exists, review against its conventions FIRST.
+            - Otherwise apply strong general best practices for the repo's language/framework.
+            - Read the PR description's Scope / Deliberate trade-offs / Verification sections (when present)
+              as author-supplied context: a trade-off stated there with its reasoning is intentional — flag it
+              only if the reasoning is wrong or genuinely unsafe, not merely because a fuller version exists.
+              Treat "Not in scope" items as tracked elsewhere. VERIFY claims rather than trusting them (a
+              "tests pass" claim doesn't close review of the logic), and if the description contradicts the
+              diff, say so — the diff is the truth.
+
+            Prioritize, in order:
+            1. Correctness — logic errors, unhandled edge cases, race conditions, broken error handling.
+            2. Security — injection, auth/authz gaps, secrets in code, unsafe input handling, SSRF/path traversal.
+            3. Data safety — anything risking data loss or corruption.
+            4. Maintainability — dead code, needless complexity/abstraction, reinvented stdlib, poor naming.
+            5. Tests — missing coverage for new non-trivial logic.
+
+            Skip nitpicks the linter/formatter already catches. Prefer fewer, high-confidence findings over noise.
+
+            Post the review as GitHub comments — do NOT submit review text as chat messages:
+            - Use `mcp__github_inline_comment__create_inline_comment` (with `confirmed: true`) for each
+              specific file:line issue, giving the problem + a suggested fix.
+            - Submit the top-level verdict as an ACTUAL pr review (not a plain comment) so it is a
+              machine-readable state, not just prose:
+              `gh pr review ${{ github.event.pull_request.number }} --request-changes` if there is any
+              blocking problem, otherwise `--approve`. Put non-blocking notes/nits in the review body or
+              inline — do NOT downgrade to `--comment` just because you left notes (a merge gate keying on
+              --approve would deadlock on a clean-but-`--comment` review). A plain `gh pr comment` leaves
+              reviewDecision empty, so a green check then falsely reads as "reviewed."
+            - Always post an approve/request-changes verdict — never silent, never notes-only.
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr review:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+
+      # The action exits 0 whether or not a review was posted (quota errors, tool failures, and
+      # permission denials all end "green"). Make the check truthful: fail unless a review exists
+      # on the PR's current head SHA. This is the only mechanical observability without branch protection.
+      - name: Verify a review was actually posted on the head SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Refs/values pass through env so branch names are data, never shell syntax.
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUM: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # pipefail: a failed gh api call must fail the step, not yield an empty count that
+          # reads as "OK" — this step exists precisely to catch silent verification gaps.
+          set -o pipefail
+          # A PR editing this workflow is skipped by the action's validation guard — a missing
+          # review there is EXPECTED, not a failure. Warn instead of failing in that one case.
+          if ! git diff --quiet "origin/$BASE_REF" HEAD -- .github/workflows/code-review.yml; then
+            echo "::warning::This PR modifies code-review.yml — the review action skips itself here. UNREVIEWED by design; verify on the next PR after merge."
+            exit 0
+          fi
+          # Filter by author too — another bot's review (e.g. Codex) on the same head must not
+          # mask a silently-failed Claude run. "claude[bot]" is the GitHub App login the action
+          # posts under; if the app is ever renamed, update this filter or the check false-fails.
+          # awk sums the per-page counts (no bc — not guaranteed on runners) and prints 0 on empty.
+          COUNT=$(gh api --paginate "repos/$REPO/pulls/$PR_NUM/reviews" \
+            --jq "[.[] | select(.commit_id == \"$HEAD_SHA\" and .user.login == \"claude[bot]\")] | length" \
+            | awk '{s+=$1} END {print s+0}')
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::error::Claude posted no review on head $HEAD_SHA — treat this PR as UNREVIEWED by Claude."
+            exit 1
+          fi
+          echo "OK: $COUNT Claude review(s) on $HEAD_SHA"

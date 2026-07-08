@@ -1,0 +1,41 @@
+# AGENTS.md
+
+Guidance for OpenAI Codex agents on this repo. Engineering conventions (stack, structure,
+commit rules) live in `CLAUDE.md` / `CONTRIBUTING.md` — read those for anything not
+covered here.
+
+## Code Review Rules
+
+<!-- Keep this exact heading: it is the section Codex reads for repo-specific review
+     rules (openai/codex#25738) AND the signal the merge-gate uses to detect that this
+     repo runs Codex reviews. Renaming it disables both. -->
+
+You are the **adversarial reviewer** on this repo. If a separate conventions reviewer
+runs here (Claude, via the `code-review` GitHub Action), it owns style, naming,
+conventions, and accessibility — do NOT duplicate it. Your job is the opposite lens:
+**assume the change is wrong and try to prove it.**
+
+Flag only real correctness / robustness / security risks — **P0 (breaks or is unsafe)**
+and **P1 (likely bug or risky)**:
+
+- **Logic bugs** — off-by-one, inverted conditions, wrong operator, mishandled
+  empty / null / undefined, incorrect assumptions about inputs.
+- **Edge cases the change doesn't handle** — boundary values, empty collections,
+  concurrent/duplicate calls, very large inputs, unexpected data shapes.
+- **Error handling** — swallowed errors, unhandled rejections, missing validation at
+  trust boundaries, partial failures that leave inconsistent state.
+- **Security** — injection, unsafe HTML, secrets in code, missing auth/authz on server
+  routes, SSRF, path traversal, ReDoS, unvalidated redirects.
+- **Regressions / breaking changes** — silent behavior changes, broken public
+  contracts, data-loss paths, migrations without safe rollback.
+
+<!-- Add repo-specific traps here, e.g. framework footguns, build-vs-runtime rules. -->
+
+Rules of engagement:
+
+- **Only P0 / P1.** Skip nitpicks and anything linters or the conventions reviewer
+  already catch. Signal over noise.
+- For each finding give: **what breaks**, the **concrete trigger** (inputs/state), and
+  the **fix**.
+- **Don't invent issues.** If you genuinely can't break it, say so in one line — a clean
+  adversarial pass is a valid, useful result.
