@@ -75,5 +75,9 @@ if [ "$CODEX" = 1 ]; then
 fi
 echo "[gate]   optional but recommended: require status check 'merge-gate' on the"
 echo "         default branch (Settings -> Rulesets; private repos need Pro/Team)."
+echo "[loop]   per developer, once: in Claude Code say"
+echo "         \"schedule a recurring task: babysit my PRs every 30 minutes\""
+echo "         (unattended sweep even when no session is open; sessions in this"
+echo "         repo already sweep on start via the CLAUDE.md wiring)"
 echo
 echo "Commit the added files on a branch and open a PR — the reviewers review it."

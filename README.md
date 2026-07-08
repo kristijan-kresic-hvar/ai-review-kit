@@ -148,6 +148,13 @@ A human hears from it in exactly three cases: reviewer-consensus disagreement, r
 cap (3) with an open P0/P1, or a fix no runnable check can verify. Plus the merge
 click — always human. **It never merges.**
 
+**The babysitter (unattended coverage):** the CLAUDE.md wiring also makes every Claude
+Code session in the repo sweep your open PRs on start — unhandled findings get the loop
+without anyone asking. For coverage while no session is open at all, each developer
+once tells Claude Code: *"schedule a recurring task: babysit my PRs every 30 minutes"*
+(user-level schedule; a repo script can't create it for you — that's the one per-dev
+sentence the kit can't automate away).
+
 ## Files
 
 | File | What |

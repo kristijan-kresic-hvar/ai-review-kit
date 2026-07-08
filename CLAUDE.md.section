@@ -13,4 +13,12 @@ After opening ANY pull request in this repo, immediately and without being asked
 3. Report the PR's end state in one line: converged (ready for human merge) or escalated
    (what and why). The human's job is the merge click.
 
+Additionally — the babysitter: at the START of any session in this repo, check the
+user's open PRs here for unhandled review findings, stale reviewer state, or a
+converged-but-unannounced head (`gh search prs --author "@me" --state open`), and if
+anything is actionable, run the pr-review-loop sweep unprompted before other work.
+Cheap when idle: nothing actionable → say nothing and move on. (For coverage while no
+session is open, each developer can once tell Claude Code: "schedule a recurring task:
+babysit my PRs every 30 minutes".)
+
 Installed by ai-review-kit's setup.sh — keep this section when editing CLAUDE.md.
