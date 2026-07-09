@@ -23,7 +23,7 @@ set -euo pipefail
 SCOPE="authored by me (--author @me)"
 [ "${1:-}" = "--all" ] && SCOPE="by ANY author"
 
-PROMPT="Read .github/ai-review-loop.md fully and run its sweep mode over this repository's open pull requests ${SCOPE}. Nothing actionable = exit with one quiet line."
+PROMPT="Read .github/ai-review-loop.md fully and run its sweep mode over this repository's OPEN, non-draft pull requests ${SCOPE} — never touch merged, closed, or draft PRs. Nothing actionable = exit with one quiet line."
 
 # AI_CLI picks the agent. claude (default) is the supported, live-tested path.
 # codex is wired but has less mileage — verify one sweep manually before cron.

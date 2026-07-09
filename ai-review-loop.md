@@ -20,7 +20,7 @@ Drive AI review findings on a PR to convergence: triage, fix, reply, resolve, re
 ## Per-PR loop
 
 **1. Gather.**
-- `gh pr view <N> --json headRefName,headRefOid,body` — capture the head SHA; every "did it actually review?" check keys off it. Read the PR description's Scope / trade-offs sections as author context.
+- `gh pr view <N> --json state,isDraft,headRefName,headRefOid,body` — **abort immediately unless `state == "OPEN"` and `isDraft == false`.** A merged or closed PR is done; a draft isn't ready. Re-check this at the top of every round (a PR can be merged or closed by a human mid-loop) — never post to, fix, or re-trigger a PR that is no longer an open non-draft. Capture the head SHA; every "did it actually review?" check keys off it. Read the PR description's Scope / trade-offs sections as author context.
 - Inline findings, ROOT comments only (replies excluded, or later rounds re-triage your own "Fixed in…" replies as new findings):
   `gh api repos/<o>/<r>/pulls/<N>/comments --jq '[.[] | select(.in_reply_to_id == null)]'`
 - Bot logins differ by API — REST returns `claude[bot]` / `chatgpt-codex-connector[bot]`, GraphQL returns them WITHOUT the `[bot]` suffix. A filter using the wrong form matches zero threads and reads real findings as absent. Accept both forms.
@@ -56,7 +56,7 @@ Escalation = a threaded reply starting `escalated to human — <trigger>` (the m
 Everything else — including behavior-changing and security fixes — proceeds autonomously with the audit trail in the threads. The merge click is not an escalation; it is always human.
 
 ## Sweep mode ("babysit my PRs")
-- Enumerate: `gh search prs --author "@me" --state open --json repository,number,title,isDraft --limit 30`. Skip drafts and PRs idle >14 days.
+- Enumerate: `gh search prs --author "@me" --state open --json repository,number,title,isDraft --limit 30`. `--state open` already excludes merged and closed PRs; additionally skip drafts and PRs idle >14 days. (The per-PR loop re-confirms `state == OPEN && !isDraft` at every round, so a PR merged or closed between enumeration and action is dropped, not acted on.)
 - Per PR, classify against the current head using the gate's own clean definitions, then act: unaddressed findings → run the loop above; a pushback'd thread with a completed fresh review on head → tally its consensus vote (resolve or escalate); reviewer in-flight → leave it; converged → post one "All reviewers clean on <sha> — ready for human merge" comment (skip if one already exists for this head).
 - Sweep comments are **reports of what was done, never questions waiting for an answer** — the loop never parks on human input outside the three escalation triggers.
 - Caps that keep an unattended sweep safe: **one un-acked Codex trigger in flight at a time** (simultaneous triggers drop silently — stagger), re-fire cap 3 per head, round cap 3 per PR, and **re-read the head SHA immediately before every posting action** — if it moved since you classified, drop the action; the next sweep reclassifies.
