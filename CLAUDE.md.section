@@ -1,29 +1,21 @@
 
 ## AI review loop (ai-review-kit — auto-run)
 
-When CREATING a pull request in this repo, fill every section of the PR template
-(`.github/pull_request_template.md`) with real content — actual verification results,
-real trade-offs with their reasoning. Reviewers treat stated trade-offs as intentional
+When CREATING a pull request in this repo, fill every section of
+`.github/pull_request_template.md` with real content — actual verification results,
+real trade-offs with reasoning. The AI reviewers treat stated trade-offs as intentional
 and verify Verification claims; empty or false sections make reviews worse, not softer.
 
 After opening ANY pull request in this repo, immediately and without being asked:
+fire the Codex trigger (`gh pr comment <N> --body "@codex review"`) — skip it if an
+ack for this head already exists OR the repo has no Codex leg (no `## Code Review
+Rules` section in AGENTS.md) — then read `.github/ai-review-loop.md` fully and drive
+it to convergence. It is autonomous by design — only its critical escalations stop for a
+human, and it NEVER merges. Report the end state in one line.
 
-1. Fire the Codex review trigger: `gh pr comment <N> --body "@codex review"` (skip only
-   if a Codex review/ack for this head already exists — e.g. the account's auto-review
-   fired on PR open).
-2. Drive the `pr-review-loop` skill (project-local, `.claude/skills/pr-review-loop/`) to
-   convergence: triage → verified fixes → reply/resolve threads → re-trigger reviewers →
-   repeat. It is autonomous by design; only its three escalation triggers stop for a
-   human, and it NEVER merges.
-3. Report the PR's end state in one line: converged (ready for human merge) or escalated
-   (what and why). The human's job is the merge click.
-
-Additionally — the babysitter: at the START of any session in this repo, check the
-user's open PRs here for unhandled review findings, stale reviewer state, or a
-converged-but-unannounced head (`gh search prs --author "@me" --state open`), and if
-anything is actionable, run the pr-review-loop sweep unprompted before other work.
-Cheap when idle: nothing actionable → say nothing and move on. (For coverage while no
-session is open, each developer can once tell Claude Code: "schedule a recurring task:
-babysit my PRs every 30 minutes".)
+At the START of a session in this repo: `gh search prs --author "@me" --state open` —
+anything actionable → run the playbook's sweep mode unprompted. Quiet when idle.
+(For coverage between sessions: "schedule a recurring task: babysit my PRs every 30
+minutes" — or cron the installed `.claude/ai-review-babysit.sh`.)
 
 Installed by ai-review-kit's setup.sh — keep this section when editing CLAUDE.md.
