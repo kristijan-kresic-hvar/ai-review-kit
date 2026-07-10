@@ -198,7 +198,10 @@ nit-level disagreements (resolve with reasoning), security fixes that verify cle
   classification, drop the action; the next sweep reclassifies. Classification data
   expires (observed live: a stalled sweep posted "converged" on a superseded head).
 - Sweep output: one line per touched PR; untouched PRs are silent. Reports, never
-  questions — the loop parks on nothing except a critical escalation.
+  questions — the loop parks on nothing except a critical escalation. **Unsure whether
+  acting is appropriate** (odd repo state, apparent test fixtures, a PR outside every
+  bucket): SKIP it with a one-line reason in the report and move on — never end a
+  sweep with "say go" or any other question; an unattended run has no one to answer.
 
 ## Output
 One line per touched PR: what was fixed/replied/triggered, and the resulting state
