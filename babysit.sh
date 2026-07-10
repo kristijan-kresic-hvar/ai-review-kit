@@ -31,8 +31,14 @@ PROMPT="Read .github/ai-review-loop.md fully and run its sweep mode over this re
 AI_CLI="${AI_CLI:-claude}"
 case "$AI_CLI" in
   claude)
+    # disallowedTools = defense-in-depth against merge-by-API: `gh api` must stay
+    # allowed (thread replies/resolves have no higher-level gh command), but the
+    # REST merge endpoint (…/pulls/N/merge), the branch-merge endpoint (…/merges),
+    # and the GraphQL mergePullRequest mutation are explicitly denied. Deny beats
+    # allow in Claude Code's permission resolution.
     exec claude -p "$PROMPT" \
-      --allowedTools "Skill,Read,Glob,Grep,Edit,Write,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr checks:*),Bash(gh api:*),Bash(gh search:*),Bash(gh workflow run:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git worktree:*),Bash(git checkout:*),Bash(git fetch:*)" ;;
+      --allowedTools "Skill,Read,Glob,Grep,Edit,Write,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr checks:*),Bash(gh api:*),Bash(gh search:*),Bash(gh workflow run:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git worktree:*),Bash(git checkout:*),Bash(git fetch:*)" \
+      --disallowedTools "Bash(gh pr merge:*),Bash(gh api*/merge*),Bash(gh api*merges*),Bash(gh api*mergePullRequest*),Bash(git push*origin main*),Bash(git push*origin master*)" ;;
   codex)
     # --full-auto: workspace-write + on-request network; make sure your Codex config
     # allows gh/git in this repo or the sweep stalls on approvals.
