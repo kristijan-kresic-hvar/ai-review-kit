@@ -42,11 +42,14 @@ could settle.
 - **Threads via GraphQL** (this is what makes rounds and sweeps idempotent — REST
   comments carry no resolution state):
   ```
-  gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewThreads(first:100){nodes{id isResolved isOutdated path line originalLine root: comments(first:1){nodes{databaseId body author{login}}} latest: comments(last:10){nodes{databaseId body author{login} createdAt}}}}}}}' -F o=<o> -F r=<r> -F n=<N>
+  gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewThreads(first:100){totalCount nodes{id isResolved isOutdated path line originalLine root: comments(first:1){nodes{databaseId body author{login}}} latest: comments(last:10){nodes{databaseId body author{login} createdAt}}}}}}}' -F o=<o> -F r=<r> -F n=<N>
   ```
   (`root` identifies the finding; `latest` is what the rebuttal/escalation rules below
   read — a `first:N` slice alone hides the newest replies on long threads, exactly
   where a human blocker sits.)
+  **`totalCount` > 100 → stop: the page is not the PR.** Unresolved findings past the
+  first page are invisible — never classify, resolve, or converge such a PR; surface
+  "too many review threads to verify" instead (the gate fails closed at the same cap).
   Triage ONLY `isResolved == false` threads. A resolved thread is a processed finding —
   match any re-flag against resolved ones on (path, originalLine, gist), and a match is
   NOT a fresh finding to re-triage: it is the referee verdict on that disputed finding
@@ -126,10 +129,14 @@ can resolve the wrong finding.
   comment the gate verifies.
 - A pushback-only round (no fixes to push) still needs fresh verdicts: push ONE empty
   commit (`ci: re-trigger review`) — without it the Claude leg deadlocks red.
-- **Silence is not approval.** Before calling a PR clean, verify each configured
-  reviewer posted on the CURRENT head (`gh api repos/<o>/<r>/pulls/<N>/reviews`, check
-  `commit_id` + the reviewer's own login). Green job rows prove nothing — the review
-  job exits 0 whether or not a review was posted; the `merge-gate` status is the truth.
+- **Silence is not approval — and each leg has its own completion artifact.** Before
+  calling a PR clean, verify per leg on the CURRENT head: **Claude** = a claude[bot]
+  review with `commit_id` == head (`gh api --paginate repos/<o>/<r>/pulls/<N>/reviews`);
+  **Codex** = the head-naming "didn't find any major issues" ISSUE comment (clean) or a
+  COMMENTED review on head (findings) — a clean Codex pass posts NO review, so checking
+  `pulls/<N>/reviews` for it reads clean as silent and re-triggers forever. Green job
+  rows prove nothing — the review job exits 0 whether or not a review was posted; the
+  `merge-gate` status is the truth.
 
 **6. Loop.** Repeat only when a round yields new VALID-worth-it findings. **Round cap:
 3 per PR, not per head** — count your own `Fixed in …` reply rounds across the whole

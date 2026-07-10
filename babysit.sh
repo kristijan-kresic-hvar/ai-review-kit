@@ -23,7 +23,12 @@ set -euo pipefail
 SCOPE="authored by me (--author @me)"
 [ "${1:-}" = "--all" ] && SCOPE="by ANY author"
 
-PROMPT="Read .github/ai-review-loop.md fully and run its sweep mode over this repository's OPEN, non-draft pull requests ${SCOPE} — never touch merged, closed, or draft PRs. Nothing actionable = exit with one quiet line."
+# Hard repo scope: the playbook's enumerate is account-wide by default; a repo-local
+# cron must not act on other repos (their own crons/sessions own them). Observed live:
+# without the explicit slug, a sweep crossed repos.
+REPO_SLUG=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
+
+PROMPT="Read .github/ai-review-loop.md fully and run its sweep mode restricted STRICTLY to the repository ${REPO_SLUG} — filter the enumerate to that repo, pass -R ${REPO_SLUG} on every command, and ignore PRs in any other repository. Scope: OPEN, non-draft pull requests ${SCOPE} — never touch merged, closed, or draft PRs. Nothing actionable = exit with one quiet line."
 
 # AI_CLI picks the agent. claude (default) is the supported, live-tested path.
 # codex is wired but has less mileage — verify one sweep manually before cron.
@@ -31,14 +36,19 @@ PROMPT="Read .github/ai-review-loop.md fully and run its sweep mode over this re
 AI_CLI="${AI_CLI:-claude}"
 case "$AI_CLI" in
   claude)
-    # disallowedTools = defense-in-depth against merge-by-API: `gh api` must stay
-    # allowed (thread replies/resolves have no higher-level gh command), but the
-    # REST merge endpoint (…/pulls/N/merge), the branch-merge endpoint (…/merges),
-    # and the GraphQL mergePullRequest mutation are explicitly denied. Deny beats
-    # allow in Claude Code's permission resolution.
+    # disallowedTools = defense-in-depth (deny beats allow in Claude Code's
+    # permission resolution). `gh api` must stay allowed (thread replies/resolves
+    # have no higher-level gh command), so instead of enumerating dangerous
+    # endpoints: every explicit-method call (-X / --method) is denied — the loop's
+    # legitimate writes (thread replies, graphql resolves) are all default-POSTs
+    # that never pass a method flag, while merges, ref moves, and deletes require
+    # one. The GraphQL merge mutation carries no method flag, so it stays denied
+    # by name. git push denies match ANY refspec containing main/master (covers
+    # `origin HEAD:main`); branch names containing 'main'/'master' over-block —
+    # fail-closed, rename the branch.
     exec claude -p "$PROMPT" \
       --allowedTools "Skill,Read,Glob,Grep,Edit,Write,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr checks:*),Bash(gh api:*),Bash(gh search:*),Bash(gh workflow run:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git worktree:*),Bash(git checkout:*),Bash(git fetch:*)" \
-      --disallowedTools "Bash(gh pr merge:*),Bash(gh api*/merge*),Bash(gh api*merges*),Bash(gh api*mergePullRequest*),Bash(git push*origin main*),Bash(git push*origin master*)" ;;
+      --disallowedTools "Bash(gh pr merge:*),Bash(gh api* -X *),Bash(gh api*--method*),Bash(gh api*/merge*),Bash(gh api*merges*),Bash(gh api*mergePullRequest*),Bash(git push*main*),Bash(git push*master*)" ;;
   codex)
     # --full-auto: workspace-write + on-request network; make sure your Codex config
     # allows gh/git in this repo or the sweep stalls on approvals.
