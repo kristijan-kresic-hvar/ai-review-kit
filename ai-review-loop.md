@@ -134,14 +134,16 @@ can resolve the wrong finding.
   comment the gate verifies.
 - A pushback-only round (no fixes to push) still needs fresh verdicts: push ONE empty
   commit (`ci: re-trigger review`) — without it the Claude leg deadlocks red.
-- **Silence is not approval — and each leg has its own completion artifact.** Before
-  calling a PR clean, verify per leg on the CURRENT head: **Claude** = a claude[bot]
-  review with `commit_id` == head (`gh api --paginate repos/<o>/<r>/pulls/<N>/reviews`);
-  **Codex** = the head-naming "didn't find any major issues" ISSUE comment (clean) or a
-  COMMENTED review on head (findings) — a clean Codex pass posts NO review, so checking
-  `pulls/<N>/reviews` for it reads clean as silent and re-triggers forever. Green job
-  rows prove nothing — the review job exits 0 whether or not a review was posted; the
-  `merge-gate` status is the truth.
+- **Silence is not approval — and each leg has its own CLEAN artifact.** Verify per
+  leg on the CURRENT head: **Claude clean** = the LATEST claude[bot] review with
+  `commit_id` == head has state APPROVED (`gh api --paginate
+  repos/<o>/<r>/pulls/<N>/reviews` — reviews are chronological, take the last; a
+  COMMENTED or CHANGES_REQUESTED latest is not clean). **Codex clean** = the
+  head-naming "didn't find any major issues" ISSUE comment AND zero unresolved Codex
+  threads — a COMMENTED review is the FINDINGS artifact, never a clean signal, and a
+  clean Codex pass posts NO review at all, so checking `pulls/<N>/reviews` for it reads
+  clean as silent and re-triggers forever. Green job rows prove nothing — the review
+  job exits 0 whether or not a review was posted; the `merge-gate` status is the truth.
 
 **6. Loop.** Repeat only when a round yields new VALID-worth-it findings. **Round cap:
 3 per PR, not per head** — count your own `Fixed in …` reply rounds across the whole

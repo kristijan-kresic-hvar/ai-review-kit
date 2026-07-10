@@ -13,6 +13,13 @@
 # (the pr-review-loop skill is project-local). By default it handles PRs YOU authored;
 # pass --all to babysit every open PR in the repo (e.g. one maintainer covering a team).
 #
+# Headless fix ceiling (deliberate): the allowlist carries no project build/test
+# commands, so the sweep only pushes fixes it can verify with the tools it has —
+# anything needing the project's own verification surfaces in the report for an
+# interactive session instead (fail-closed, never push-unverified). Lock ceiling:
+# a sweep running past 2h loses its lock to the stale-steal; at the 30-min cadence
+# that long a run is treated as hung by definition.
+#
 # The allowlist scopes what the headless agent may do: read PR/review state, comment,
 # resolve threads, commit and push fixes to PR branches. `gh pr merge` is NOT allowed,
 # and the skill's hard rules forbid merging and pushing to the default branch either
@@ -65,8 +72,8 @@ case "$AI_CLI" in
     # and ANY refspec containing main/master (`origin HEAD:main`); branch names
     # containing 'main'/'master' over-block — fail-closed, rename the branch.
     exec claude -p "$PROMPT" \
-      --allowedTools "Skill,Read,Glob,Grep,Edit,Write,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr checks:*),Bash(gh api:*),Bash(gh search:*),Bash(gh workflow run:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git worktree:*),Bash(git checkout:*),Bash(git fetch:*)" \
-      --disallowedTools "Bash(gh pr merge:*),Bash(gh api* -X *),Bash(gh api*--method*),Bash(gh api*/merge*),Bash(gh api*merges*),Bash(gh api*mergePullRequest*),Bash(gh api*createCommitOnBranch*),Bash(gh api*updateRef*),Bash(gh api*deleteRef*),Bash(gh api*createRef*),Bash(git push),Bash(git push origin),Bash(git push origin HEAD),Bash(git push -u origin HEAD),Bash(git push*HEAD),Bash(git push*main*),Bash(git push*master*)" ;;
+      --allowedTools "Skill,Read,Glob,Grep,Edit,Write,Bash(jq:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr checks:*),Bash(gh api:*),Bash(gh search:*),Bash(gh workflow run:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git worktree:*),Bash(git checkout:*),Bash(git fetch:*)" \
+      --disallowedTools "Bash(gh pr merge:*),Bash(gh api* -X *),Bash(gh api*--method*),Bash(gh api*/merge*),Bash(gh api*merges*),Bash(gh api*mergePullRequest*),Bash(gh api*createCommitOnBranch*),Bash(gh api*updateRef*),Bash(gh api*deleteRef*),Bash(gh api*createRef*),Bash(gh api*/git/*),Bash(git push),Bash(git push origin),Bash(git push origin HEAD),Bash(git push -u origin HEAD),Bash(git push*HEAD),Bash(git push*main*),Bash(git push*master*)" ;;
   codex)
     # --full-auto: workspace-write + on-request network; make sure your Codex config
     # allows gh/git in this repo or the sweep stalls on approvals.
