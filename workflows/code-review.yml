@@ -39,6 +39,59 @@ jobs:
         with:
           fetch-depth: 0
 
+      # OPTIONAL Linear leg: if the repo tracks work in Linear, feed the linked ticket's
+      # spec (Acceptance Criteria / Not-in-scope / Verification) to the reviewer so it
+      # judges intent, not just code quality. Entirely self-gating — no LINEAR_API_KEY
+      # secret, or no Linear issue id in the branch/title/body, and this is a silent no-op
+      # (empty output -> prompt unchanged). A Linear outage never fails the review either.
+      # Setup for repos that want it: gh secret set LINEAR_API_KEY  (a Linear personal API
+      # key; read-only issue access, works on any Linear plan). The linkback PR comment is
+      # deliberately NOT used — on private teams it often carries only the bare issue key.
+      - name: Fetch linked Linear ticket spec (optional)
+        id: linear
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # No key => this repo doesn't use Linear. Skip silently. (No pipefail here: a
+          # Linear/network failure must degrade to "review without spec", never fail CI.)
+          if [ -z "$LINEAR_API_KEY" ]; then
+            echo "no LINEAR_API_KEY set — skipping Linear spec fetch"; exit 0
+          fi
+          # First Linear-style issue id (ANY team prefix) in branch, title, or body.
+          ID=$(printf '%s\n%s\n%s' "$HEAD_REF" "$PR_TITLE" "$PR_BODY" \
+                 | grep -oE '[A-Z][A-Z0-9]+-[0-9]+' | head -1 || true)
+          if [ -z "$ID" ]; then
+            echo "no Linear issue id in branch/title/body — skipping"; exit 0
+          fi
+          # id accepts the human identifier (e.g. KKD-6); passed as a GraphQL variable so a
+          # branch name can never inject into the query. description holds AC/scope/verification.
+          SPEC=$(curl -sf https://api.linear.app/graphql \
+                   -H "Authorization: $LINEAR_API_KEY" \
+                   -H "Content-Type: application/json" \
+                   -d "{\"query\":\"query(\$id:String!){issue(id:\$id){identifier title description}}\",\"variables\":{\"id\":\"$ID\"}}" \
+                 | jq -r 'if .data.issue then "# "+.data.issue.identifier+" — "+.data.issue.title+"\n\n"+(.data.issue.description // "(no description)") else empty end' || true)
+          if [ -z "$SPEC" ]; then
+            echo "::warning::Linear issue $ID not found/unreadable — reviewing without spec"; exit 0
+          fi
+          # Emit the whole prompt section (or nothing), so the review prompt just interpolates it.
+          {
+            echo "spec<<LINEAR_EOF"
+            echo "LINKED LINEAR TICKET (author-supplied spec — the intent this PR must satisfy):"
+            echo
+            echo "$SPEC"
+            echo
+            echo "Also review the diff against this ticket:"
+            echo "- Each Acceptance Criteria item: satisfied by the diff? Report Addressed / Not-addressed / Unclear."
+            echo "- Any change implementing or touching a \"Not in scope\" item -> flag as scope creep."
+            echo "- Each Verification Test Scenario: does the diff add/update a test covering it? Flag uncovered ones."
+            echo "The ticket is context, not ground truth: if the diff contradicts it, the diff is what shipped — say so."
+            echo "LINEAR_EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "fetched Linear spec for $ID"
+
       - name: Run Claude code review
         uses: anthropics/claude-code-action@v1
         with:
@@ -66,6 +119,8 @@ jobs:
               Treat "Not in scope" items as tracked elsewhere. VERIFY claims rather than trusting them (a
               "tests pass" claim doesn't close review of the logic), and if the description contradicts the
               diff, say so — the diff is the truth.
+
+            ${{ steps.linear.outputs.spec }}
 
             Prioritize, in order:
             1. Correctness — logic errors, unhandled edge cases, race conditions, broken error handling.

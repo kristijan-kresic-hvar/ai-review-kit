@@ -87,6 +87,22 @@ same for other agents).
    Rules` section it automatically cedes deep bug-hunting to Codex and owns
    craftsmanship (with no Codex, it covers both roles).
 
+#### Linear-aware review (optional)
+
+If the repo tracks work in Linear, the Claude reviewer can also check the diff against
+the **linked ticket's spec** — its Acceptance Criteria, Not-in-scope, and Verification
+scenarios — so it catches "missed AC #3" and scope creep, not just code smells. One
+step, zero code coupling:
+
+    gh secret set LINEAR_API_KEY --repo <owner>/<repo>   # a Linear personal API key
+
+The reviewer's Linear step then fetches the ticket named in the branch/PR-title/body
+(any team prefix, e.g. `KKD-6`) via the Linear API and appends its spec to the review
+prompt. Entirely self-gating: **no secret, or no issue id in the branch → silent no-op**,
+and a Linear outage degrades to a normal review rather than failing CI. It reads issues
+only (works on any Linear plan) and does *not* rely on the linkback PR comment — on
+private teams that comment often carries only the bare issue key.
+
 ### Codex leg (per repo, once)
 
 1. Install the Codex GitHub app and enable code review for the repo:
