@@ -89,6 +89,9 @@ if [ "$CLAUDE" = 1 ]; then
     echo "         gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo $REPO"
     echo "         (or run /install-github-app inside Claude Code)"
   fi
+  echo "[linear] optional — review against linked Linear tickets (AC / scope / verification):"
+  echo "         gh secret set LINEAR_API_KEY --repo $REPO   (a Linear personal API key)"
+  echo "         no secret or no issue id in the branch => the step is a silent no-op"
 fi
 if [ "$CODEX" = 1 ]; then
   echo "[codex]  install the Codex GitHub app + enable code review for this repo:"
