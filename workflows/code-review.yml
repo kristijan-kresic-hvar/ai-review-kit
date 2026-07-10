@@ -68,7 +68,9 @@ jobs:
           fi
           # id accepts the human identifier (e.g. KKD-6); passed as a GraphQL variable so a
           # branch name can never inject into the query. description holds AC/scope/verification.
-          SPEC=$(curl -sf https://api.linear.app/graphql \
+          # --max-time: this optional step sits on the review's critical path — a hung Linear
+          # call must degrade to "review without spec", not eat the job's timeout budget.
+          SPEC=$(curl -sf --max-time 15 https://api.linear.app/graphql \
                    -H "Authorization: $LINEAR_API_KEY" \
                    -H "Content-Type: application/json" \
                    -d "{\"query\":\"query(\$id:String!){issue(id:\$id){identifier title description}}\",\"variables\":{\"id\":\"$ID\"}}" \
@@ -77,8 +79,12 @@ jobs:
             echo "::warning::Linear issue $ID not found/unreadable — reviewing without spec"; exit 0
           fi
           # Emit the whole prompt section (or nothing), so the review prompt just interpolates it.
+          # Random heredoc delimiter (GitHub's own hardening guidance): the ticket description is
+          # semi-untrusted input — a line that happened to equal a fixed delimiter would end the
+          # block early and let the remainder be parsed as workflow output commands.
+          EOF_MARK="LINEAR_EOF_$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
           {
-            echo "spec<<LINEAR_EOF"
+            echo "spec<<$EOF_MARK"
             echo "LINKED LINEAR TICKET (author-supplied spec — the intent this PR must satisfy):"
             echo
             echo "$SPEC"
@@ -88,7 +94,7 @@ jobs:
             echo "- Any change implementing or touching a \"Not in scope\" item -> flag as scope creep."
             echo "- Each Verification Test Scenario: does the diff add/update a test covering it? Flag uncovered ones."
             echo "The ticket is context, not ground truth: if the diff contradicts it, the diff is what shipped — say so."
-            echo "LINEAR_EOF"
+            echo "$EOF_MARK"
           } >> "$GITHUB_OUTPUT"
           echo "fetched Linear spec for $ID"
 
