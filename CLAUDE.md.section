@@ -13,8 +13,10 @@ Rules` section in AGENTS.md) — then read `.github/ai-review-loop.md` fully and
 it to convergence. It is autonomous by design — only its critical escalations stop for a
 human, and it NEVER merges. Report the end state in one line.
 
-At the START of a session in this repo: `gh search prs --author "@me" --state open` —
-anything actionable → run the playbook's sweep mode unprompted. Quiet when idle.
+At the START of a session in this repo: `gh search prs --author "@me" --state open
+--repo <this repo's owner/name>` — THIS repository only (other repos' sweeps belong to
+their own sessions/crons); anything actionable → run the playbook's sweep mode
+unprompted, restricted to this repo. Quiet when idle.
 (For coverage between sessions: "schedule a recurring task: babysit my PRs every 30
 minutes" — or cron the installed `.claude/ai-review-babysit.sh`.)
 
