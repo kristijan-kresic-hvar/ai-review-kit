@@ -36,9 +36,11 @@ could settle.
   as the gate, or a PR that removes the section deadlocks red with no trigger. Run the
   loop against exactly the legs that exist — never wait on, and never trigger, a
   reviewer that isn't configured (it can't "go silent"; it was never installed).
-  **Claude-leg waiver:** when EVERY changed file is under `.github/workflows/`, the
-  review action skips itself and the gate waives the Claude leg — treat it as
-  not-applicable for that PR (no wait, no nudge), exactly as the gate does.
+  **Claude-leg waiver:** when the PR touches `code-review.yml` itself AND every
+  changed file is under `.github/workflows/`, the review action skips itself and the
+  gate waives the Claude leg — treat it as not-applicable (no wait, no nudge). A
+  workflow-only PR that does NOT touch `code-review.yml` is reviewed normally; the
+  self-skip is specific to the review workflow changing.
 - `gh pr view <N> --json state,isDraft,headRefName,headRefOid,body` — capture the head
   SHA; every "did it actually review?" check keys off it. Read the description's
   Scope / trade-offs sections as author context.
