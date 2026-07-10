@@ -31,27 +31,36 @@ could settle.
 **1. Gather.**
 - **Discover which reviewers THIS repo has — the gate's own signals:** Claude leg =
   `.github/workflows/code-review.yml` exists (or claude[bot] already reviewed this PR);
-  Codex leg = `AGENTS.md` contains a `## Code Review Rules` section (or the Codex bot
-  already touched this PR). Run the loop against exactly the legs that exist — never
-  wait on, and never trigger, a reviewer that isn't configured (it can't "go silent";
-  it was never installed).
+  Codex leg = `AGENTS.md` contains a `## Code Review Rules` section **on the default
+  branch OR the PR head** (or the Codex bot already touched this PR) — same dual probe
+  as the gate, or a PR that removes the section deadlocks red with no trigger. Run the
+  loop against exactly the legs that exist — never wait on, and never trigger, a
+  reviewer that isn't configured (it can't "go silent"; it was never installed).
 - `gh pr view <N> --json state,isDraft,headRefName,headRefOid,body` — capture the head
   SHA; every "did it actually review?" check keys off it. Read the description's
   Scope / trade-offs sections as author context.
 - **Threads via GraphQL** (this is what makes rounds and sweeps idempotent — REST
   comments carry no resolution state):
   ```
-  gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewThreads(first:100){nodes{id isResolved isOutdated path line originalLine comments(first:10){nodes{databaseId body author{login} createdAt}}}}}}}' -F o=<o> -F r=<r> -F n=<N>
+  gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewThreads(first:100){nodes{id isResolved isOutdated path line originalLine root: comments(first:1){nodes{databaseId body author{login}}} latest: comments(last:10){nodes{databaseId body author{login} createdAt}}}}}}}' -F o=<o> -F r=<r> -F n=<N>
   ```
+  (`root` identifies the finding; `latest` is what the rebuttal/escalation rules below
+  read — a `first:N` slice alone hides the newest replies on long threads, exactly
+  where a human blocker sits.)
   Triage ONLY `isResolved == false` threads. A resolved thread is a processed finding —
-  dedup any re-flag against resolved ones on (path, originalLine, gist).
+  match any re-flag against resolved ones on (path, originalLine, gist), and a match is
+  NOT a fresh finding to re-triage: it is the referee verdict on that disputed finding
+  — apply step 4's re-flag rule to it (P0/P1 → escalate; below → cheap fix or final
+  resolve). Never silently drop it.
   **Rebuttal exception:** a non-self reply NEWER than your last disposition reply in
   any thread (open or resolved) is live input — a human's is a directive; a reviewer's
   is a finding to re-triage. Never re-assert a prior disposition over a rebuttal, and
   never touch a thread whose latest self-reply starts `escalated to human`.
-- **Summary findings too:** `gh api repos/<o>/<r>/issues/<N>/comments` and the review
-  bodies (`pulls/<N>/reviews`) — bot verdict bodies can carry findings with no inline
-  thread; humans comment directives there.
+- **Summary findings too:** `gh api --paginate repos/<o>/<r>/issues/<N>/comments` and
+  the review bodies (`gh api --paginate repos/<o>/<r>/pulls/<N>/reviews`) — bot verdict
+  bodies can carry findings with no inline thread; humans comment directives there.
+  Always `--paginate`: a first-page-only read hides late findings and human directives
+  on busy PRs. (gh rejects `--slurp` combined with `--jq` — pipe to `jq` instead.)
 - Bot logins differ by API: REST returns `claude[bot]` / `chatgpt-codex-connector[bot]`,
   GraphQL returns them WITHOUT `[bot]`. Accept both forms or you'll match zero threads
   and read real findings as absent.
@@ -154,6 +163,9 @@ nit-level disagreements (resolve with reasoning), security fixes that verify cle
   Default scope is your PRs across repos; when the caller supplies a narrower scope
   (the babysitter runs per-repo, optionally `--all` authors within it), honor that.
   Skip drafts and PRs idle >14 days. Skip repos with no configured AI reviewers.
+  **Every follow-up command carries `-R <owner>/<repo>` from the search result's
+  `repository` field** — a bare `gh pr view <N>` resolves N against the current
+  working directory's repo and can act on the wrong PR entirely.
 - Per PR, classify against the current head with the gate's own clean definitions:
   - **Unprocessed findings on head** (unresolved non-escalated threads, or un-replied
     body findings) → run the per-PR loop above.
