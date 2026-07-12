@@ -2,8 +2,9 @@
 # when every APPLICABLE AI reviewer is clean on the CURRENT head. A leg applies when its
 # reviewer is configured OR has activity on the PR:
 #   - Claude: a review by claude[bot], state APPROVED, on the head SHA. Waived (with a
-#     note) only when the PR's ONLY changes are workflow files — the review action skips
-#     PRs editing code-review.yml, but a code+workflow bundle must still be reviewed.
+#     note) only when the PR touches code-review.yml itself AND every changed file is a
+#     workflow file — the review action self-skips only code-review.yml edits; other
+#     workflow-only PRs are reviewed normally, and a code+workflow bundle goes red.
 #   - Codex: zero unresolved Codex threads AND a clean-pass comment ("didn't find any
 #     major issues") whose embedded 10+ hex-char commit SHA prefixes the head. (A 👍 reaction is a
 #     weak hint only — no GitHub event fires for reactions, so it can never flip the
