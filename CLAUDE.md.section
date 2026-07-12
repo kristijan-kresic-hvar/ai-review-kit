@@ -17,7 +17,8 @@ At the START of a session in this repo: `gh search prs --author "@me" --state op
 --repo <this repo's owner/name>` — THIS repository only (other repos' sweeps belong to
 their own sessions/crons); anything actionable → run the playbook's sweep mode
 unprompted, restricted to this repo. Quiet when idle.
-(For coverage between sessions: "schedule a recurring task: babysit my PRs every 30
-minutes" — or cron the installed `.claude/ai-review-babysit.sh`.)
+(Coverage between sessions is owned by the CRON babysitter — `.claude/ai-review-babysit.sh`
+on a `*/30` crontab. Do NOT also create a Claude scheduled task for sweeping: it runs
+under interactive permission settings and doesn't take the script's lock.)
 
 Installed by ai-review-kit's setup.sh — keep this section when editing CLAUDE.md.
