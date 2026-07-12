@@ -112,11 +112,11 @@ if [ "$CODEX" = 1 ]; then
 fi
 echo "[gate]   optional but recommended: require status check 'merge-gate' on the"
 echo "         default branch (Settings -> Rulesets; private repos need Pro/Team)."
-echo "[loop]   babysitter routine (per developer, once) — pick ONE:"
-echo "         cron:        crontab -e   then add:"
-echo "                      */30 * * * * cd $(pwd) && .claude/ai-review-babysit.sh >> \$HOME/.ai-review-kit-babysit.log 2>&1"
-echo "         Claude Code: say \"schedule a recurring task: babysit my PRs every 30 minutes\""
-echo "         (sessions in this repo also sweep on start via the CLAUDE.md wiring;"
-echo "          the routine covers PRs opened outside Claude Code between sessions)"
+echo "[loop]   babysitter cron (per developer, once):  crontab -e   then add:"
+echo "         */30 * * * * cd $(pwd) && .claude/ai-review-babysit.sh >> \$HOME/.ai-review-kit-babysit.log 2>&1"
+echo "         (prompt-free: permissions are decided by the script's launch flags."
+echo "          Do NOT use a Claude Code scheduled task for this — interactive"
+echo "          permission prompts stall it and it bypasses the script's lock."
+echo "          Sessions in this repo additionally sweep on start via CLAUDE.md.)"
 echo
 echo "Commit the added files on a branch and open a PR — the reviewers review it."
