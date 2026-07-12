@@ -19,6 +19,30 @@ exactly two things: the merge click, and answering the rare critical escalation.
 - **merge-gate**: a commit status on the PR head. Detects which reviewers the repo has
   and gates on exactly those. One reviewer is fine; zero = gate stays out of the way.
 
+## Status: battle-tested (solo, GitHub, 2026-07)
+
+Everything here ran live before being called done — not simulated, not mocked:
+
+- **4 real PRs driven end-to-end** on a production repo: findings → verified fixes →
+  every thread replied + resolved → re-review → gate green → human merge. One PR took
+  6 adversarial review rounds; all 24 of its P1 findings were triaged against the code
+  (fixed or rebutted with evidence), none blindly accepted.
+- **Gate scenario matrix 6/6** on a throwaway repo: no-reviewers green, silent-reviewer
+  red, workflow-only waiver + zero-reviewer guard, on-head Codex detection,
+  `workflow_dispatch` re-eval (flipped a stale green after config changed under it),
+  `issue_comment` re-eval.
+- **14/14 local tests**: every `setup.sh` variant (legs, idempotent re-run,
+  preserve-existing), every Linear-step degradation path (no key / no id / API failure
+  / timeout / issue-not-found), and a delimiter-injection attempt contained.
+- **2 unattended headless sweeps** observed live, including the permission denies
+  stopping a merge-by-API attempt and the single-flight lock rejecting a second run.
+- **Ticket-aware review proven**: reviewer verdict explicitly checked the linked
+  ticket's acceptance criteria ("all three KKD-11 acceptance criteria satisfied").
+
+Scope honesty: tested by ONE person on solo repos. Multi-collaborator flows (fork PRs,
+concurrent authors) are designed for but not exercised. The loop's fix rounds are
+capped at 3 per PR; reviewers bill your Claude/ChatGPT subscriptions per round.
+
 ## Prerequisites
 
 - A GitHub repo (Actions enabled).
