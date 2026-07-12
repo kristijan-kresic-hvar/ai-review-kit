@@ -98,11 +98,15 @@ Then the manual steps the script prints:
 4. **Gate (recommended):** require status check **`merge-gate`** on the default branch
    (Settings → Rulesets; private repos need Pro/Team, public free). Without it the
    status is visual — don't merge on red.
-5. **Babysitter (per developer, once):** either tell Claude Code
-   *"schedule a recurring task: babysit my PRs every 30 minutes"*, or cron the
-   installed runner:
+5. **Babysitter (per developer, once) — cron is the recommended path:**
    `*/30 * * * * cd /abs/path/to/repo && .claude/ai-review-babysit.sh >> "$HOME/.ai-review-kit-babysit.log" 2>&1`
-   Default scope: PRs you authored; `--all` covers every open PR in the repo.
+   Prompt-free by construction (permissions decided at launch: explicit allowlist +
+   hard deny-layer), agent-agnostic via `AI_CLI`, single-flight locked, and desktop
+   notifications via the bundled `ai-review-notify.sh` helper. Default scope: PRs you
+   authored; `--all` covers every open PR in the repo.
+   (Alternative: a Claude Code scheduled task — but it runs under your interactive
+   permission settings and will prompt on anything not pre-allowed. Don't run both;
+   the scheduled task doesn't take the script's lock.)
 
 ## The fix loop
 

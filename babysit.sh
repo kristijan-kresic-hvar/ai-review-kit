@@ -4,10 +4,15 @@
 # reply/resolve threads, re-trigger reviewers, announce converged PRs. Exits quietly
 # when nothing is actionable.
 #
-# Run it manually, or on a schedule (every ~30 min):
+# Run it manually, or on a schedule (every ~30 min) — CRON IS THE RECOMMENDED PATH:
+# permissions are decided at launch by the flags below (allowlist + hard deny-layer),
+# so an unattended run can never stall on a permission prompt, and AI_CLI keeps it
+# agent-agnostic. Works invoked as the repo-installed copy OR straight from the kit
+# clone; either way run it FROM the target repo's root:
 #   crontab -e   →   */30 * * * * cd /abs/path/to/repo && .claude/ai-review-babysit.sh >> "$HOME/.ai-review-kit-babysit.log" 2>&1
-# (Claude Code users can instead tell Claude once: "schedule a recurring task:
-#  babysit my PRs every 30 minutes" — same effect, managed inside Claude Code.)
+# (A Claude Code scheduled task can do the same job, but it runs with your interactive
+#  permission settings — expect prompts unless those are pre-allowed. Don't run both:
+#  the scheduled task doesn't take this script's lock.)
 #
 # Needs: `claude` CLI + `gh` CLI authenticated as you. Must run from the repo root
 # (the pr-review-loop skill is project-local). By default it handles PRs YOU authored;
@@ -25,7 +30,14 @@
 # and the skill's hard rules forbid merging and pushing to the default branch either
 # way; the merge-gate status stays the human's merge signal.
 set -euo pipefail
+# cron ships a bare PATH (/usr/bin:/bin) — claude/gh/jq live in homebrew paths.
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
 [ -f .github/ai-review-loop.md ] || { echo "run from a repo with ai-review-kit installed"; exit 1; }
+
+# Desktop-notification helper (sibling file): the ONLY notification capability the
+# agent gets — a raw osascript allowlist entry would hand it all of AppleScript.
+NOTIFY="$(cd "$(dirname "$0")" && pwd)/ai-review-notify.sh"
+[ -x "$NOTIFY" ] || NOTIFY=""
 
 # Single-flight lock: a sweep can legitimately outlive the cron interval (the playbook
 # bounds each reviewer wait at ~20 min and caps re-fires, but a multi-PR round chains
@@ -61,6 +73,9 @@ SCOPE="authored by me (--author @me)"
 REPO_SLUG=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
 
 PROMPT="Read .github/ai-review-loop.md fully and run its sweep mode restricted STRICTLY to the repository ${REPO_SLUG} — filter the enumerate to that repo, and ignore PRs in any other repository. Repo-scope every command: -R ${REPO_SLUG} on gh pr/gh search commands, fully-qualified repos/${REPO_SLUG}/... paths on gh api calls (gh api has no -R flag). Scope: OPEN, non-draft pull requests ${SCOPE} — never touch merged, closed, or draft PRs. Nothing actionable = exit with one quiet line."
+if [ -n "$NOTIFY" ]; then
+  PROMPT="$PROMPT Where the playbook says to notify the human (converged PR, critical escalation, dead reviewer leg, security-fix FYI), run: $NOTIFY '<one-line message>' — that is your only notification channel."
+fi
 
 # AI_CLI picks the agent. claude (default) is the supported, live-tested path.
 # codex is wired but has less mileage — verify one sweep manually before cron.
@@ -81,8 +96,10 @@ case "$AI_CLI" in
     # denies cover bare pushes (branch inferred from a default-branch checkout)
     # and ANY refspec containing main/master (`origin HEAD:main`); branch names
     # containing 'main'/'master' over-block — fail-closed, rename the branch.
+    ALLOWED="Skill,Read,Glob,Grep,Edit,Write,Bash(jq:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr checks:*),Bash(gh api:*),Bash(gh search:*),Bash(gh workflow run:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git worktree:*),Bash(git checkout:*),Bash(git fetch:*)"
+    [ -n "$NOTIFY" ] && ALLOWED="$ALLOWED,Bash($NOTIFY:*)"
     claude -p "$PROMPT" \
-      --allowedTools "Skill,Read,Glob,Grep,Edit,Write,Bash(jq:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr checks:*),Bash(gh api:*),Bash(gh search:*),Bash(gh workflow run:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git worktree:*),Bash(git checkout:*),Bash(git fetch:*)" \
+      --allowedTools "$ALLOWED" \
       --disallowedTools "Bash(gh pr merge:*),Bash(gh api* -X *),Bash(gh api*--method*),Bash(gh api*/merge*),Bash(gh api*merges*),Bash(gh api*mergePullRequest*),Bash(gh api*createCommitOnBranch*),Bash(gh api*updateRef*),Bash(gh api*deleteRef*),Bash(gh api*createRef*),Bash(gh api*/git/*),Bash(git push),Bash(git push origin),Bash(git push origin HEAD),Bash(git push -u origin HEAD),Bash(git push*HEAD),Bash(git push*main*),Bash(git push*master*)" ;;
   codex)
     # --full-auto: workspace-write + on-request network. Smoke-tested 2026-07-13: an

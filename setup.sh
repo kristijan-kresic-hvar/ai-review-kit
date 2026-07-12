@@ -40,10 +40,12 @@ cp "$KIT/skills/pr-review-loop.md" .claude/skills/pr-review-loop/SKILL.md
 echo "installed .claude/skills/pr-review-loop/SKILL.md (Claude Code shim -> playbook)"
 
 # The babysitter — unattended sweep runner for cron/manual use, so PRs opened OUTSIDE
-# Claude Code (web UI, plain terminal) still get the loop.
+# Claude Code (web UI, plain terminal) still get the loop. The notify helper is its
+# sibling: the only desktop-notification capability the headless agent gets.
 cp "$KIT/babysit.sh" .claude/ai-review-babysit.sh
-chmod +x .claude/ai-review-babysit.sh
-echo "installed .claude/ai-review-babysit.sh (unattended babysitter — see checklist)"
+cp "$KIT/ai-review-notify.sh" .claude/ai-review-notify.sh
+chmod +x .claude/ai-review-babysit.sh .claude/ai-review-notify.sh
+echo "installed .claude/ai-review-babysit.sh + ai-review-notify.sh (unattended babysitter — see checklist)"
 
 # Review-optimized PR structure for everyone — GitHub pre-fills it on every new PR.
 if [ -f .github/pull_request_template.md ]; then
