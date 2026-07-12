@@ -69,9 +69,12 @@ already touched the PR). Bare AGENTS.md presence is deliberately NOT the signal.
 
 ## Setup
 
-From the **target repo's root**:
+Clone the kit once, then run the installer from each **target repo's root**:
 
 ```bash
+git clone https://github.com/kristijan-kresic-hvar/ai-review-kit.git
+
+cd <your-repo>
 path/to/ai-review-kit/setup.sh            # both legs
 path/to/ai-review-kit/setup.sh --claude   # Claude only
 path/to/ai-review-kit/setup.sh --codex    # Codex only
@@ -128,8 +131,9 @@ cannot fire Codex and the loop/babysitter (running as you) is the trigger mechan
   `code-review.yml` ends with a verify step that fails unless a claude[bot] review
   exists on the head SHA. Trust the `merge-gate` status, not green job rows.
 - **A PR editing `code-review.yml` is skipped by the action itself** (workflow-
-  validation guard). The gate waives the Claude leg only when every changed file is
-  under `.github/workflows/`; verify workflow changes on the next normal PR.
+  validation guard). The gate waives the Claude leg only when that PR is ALSO
+  workflow-only (every changed file under `.github/workflows/`) — a code+workflow
+  bundle goes red ("split the PR"). Verify workflow changes on the next normal PR.
 - **Codex's clean signal is the head-naming comment**, not its 👍 reaction (no GitHub
   event fires for reactions, and they aren't head-scoped).
 - **merge-gate red + codex-review yellow = normal mid-review state.** Red flips green
@@ -150,3 +154,7 @@ cannot fire Codex and the loop/babysitter (running as you) is the trigger mechan
 | `pull_request_template.md` | Review-optimized PR structure (Summary / Scope / Trade-offs / Verification) |
 | `CLAUDE.md.section` | Appended to the repo's CLAUDE.md — auto-runs the loop after Claude-opened PRs |
 | `setup.sh` | One-shot installer + auth checklist |
+
+## License
+
+MIT — see [LICENSE](LICENSE).
