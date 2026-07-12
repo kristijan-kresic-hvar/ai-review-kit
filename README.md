@@ -125,6 +125,27 @@ One identity requirement: the `gh` login that posts `@codex review` must belong 
 Codex-connected human — Codex rejects CI-bot triggers (tested live), which is why CI
 cannot fire Codex and the loop/babysitter (running as you) is the trigger mechanism.
 
+## Which coding agent do you develop with?
+
+The CI side is agent-agnostic — Claude and Codex review your PRs no matter what you
+code with. Only the fix loop's kickoff depends on your agent:
+
+- **Claude Code — supported, battle-tested.** Everything in the Status section ran
+  from Claude Code: CLAUDE.md wiring auto-runs the loop after every PR, the skill shim
+  routes it to the playbook, and the babysitter's headless runs carry a hard
+  deny-layer (no merge, no default-branch push, no method-flag API mutations).
+- **Codex CLI — wired, lightly tested.** The `## Pull request workflow (all
+  agents)` section of AGENTS.md routes it to the same playbook, and `AI_CLI=codex`
+  switches the babysitter to `codex exec --full-auto`. Smoke-tested live: an idle
+  sweep works out of the box (the sandbox blocks `gh`'s network; Codex degrades to
+  its own GitHub connector, keeps the repo scope, exits quietly). Two honest
+  caveats: ACTIVE fix rounds need your Codex config to allow gh/git network, and the
+  never-merge/never-main rules are prompt-level there (no deny-list equivalent —
+  Codex's sandbox is your guardrail). Verify one fix round interactively before cron.
+- **Anything else** — the playbook is one plain-markdown file any capable agent can
+  be pointed at (*"read `.github/ai-review-loop.md` and follow it"*). Unsupported,
+  no promises; `AI_CLI=<cmd>` runs it verbatim.
+
 ## Gotchas (learned live)
 
 - **A green check is not a review.** The review job exits 0 even when nothing posted;

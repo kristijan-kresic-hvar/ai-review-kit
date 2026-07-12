@@ -17,9 +17,10 @@ convergence. It is autonomous by design — verified fixes, every thread replied
 resolved, re-triggers; only its critical escalations stop for a human, and it NEVER
 merges.
 
-At the START of a session in this repo: check your open PRs here for unhandled review
-findings (`gh search prs --author "@me" --state open`) and run the loop's sweep if
-anything is actionable. Quiet when idle.
+At the START of a session in this repo: check your open PRs in THIS repository only
+(`gh search prs --author "@me" --state open --repo <owner>/<repo>` — other repos'
+sweeps belong to their own sessions/crons) and run the loop's sweep, restricted to
+this repo, if anything is actionable. Quiet when idle.
 
 ## Code Review Rules
 

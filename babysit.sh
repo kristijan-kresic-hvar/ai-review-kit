@@ -85,9 +85,17 @@ case "$AI_CLI" in
       --allowedTools "Skill,Read,Glob,Grep,Edit,Write,Bash(jq:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr checks:*),Bash(gh api:*),Bash(gh search:*),Bash(gh workflow run:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git worktree:*),Bash(git checkout:*),Bash(git fetch:*)" \
       --disallowedTools "Bash(gh pr merge:*),Bash(gh api* -X *),Bash(gh api*--method*),Bash(gh api*/merge*),Bash(gh api*merges*),Bash(gh api*mergePullRequest*),Bash(gh api*createCommitOnBranch*),Bash(gh api*updateRef*),Bash(gh api*deleteRef*),Bash(gh api*createRef*),Bash(gh api*/git/*),Bash(git push),Bash(git push origin),Bash(git push origin HEAD),Bash(git push -u origin HEAD),Bash(git push*HEAD),Bash(git push*main*),Bash(git push*master*)" ;;
   codex)
-    # --full-auto: workspace-write + on-request network; make sure your Codex config
-    # allows gh/git in this repo or the sweep stalls on approvals.
+    # --full-auto: workspace-write + on-request network. Smoke-tested 2026-07-13: an
+    # idle sweep works OUT OF THE BOX — the sandbox blocks gh's network, and Codex
+    # degrades to its own GitHub connector (repo-scoped reads) and exits quietly.
+    # ACTIVE rounds (pushing fixes, posting replies) still need your Codex config to
+    # allow gh/git network in this repo, or the sweep stalls on approvals.
+    # GUARDRAIL GAP (know what you're running): unlike the claude branch above, there
+    # is no deny-list equivalent here — the playbook's never-merge/never-main rules are
+    # prompt-level only, enforced by Codex's own sandbox/approval config, not by this
+    # script. Verify one FIX round interactively before trusting it to cron.
     codex exec --full-auto "$PROMPT" ;;
   *)
+    # Executed verbatim with the prompt appended: unsupported, no guardrails, no promises.
     $AI_CLI "$PROMPT" ;;
 esac
