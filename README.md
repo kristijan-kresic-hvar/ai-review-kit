@@ -144,15 +144,20 @@ Full bootstrap on a fresh box:
    nothing secret is stored on the machine beyond your own CLI logins.
 3. **Clone the kit** and run `setup.sh` in each target repo (idempotent — re-running
    on an already-installed repo is safe and refreshes the scripts).
-4. **Schedule the babysitter:**
-   - **macOS / Linux:** `.claude/ai-review-babysit.sh --install-cron` (idempotent).
-     Note: cron fires only while the machine is awake; missed ticks are harmless —
-     the sweep is stateless and the next tick reconciles from GitHub.
-   - **Windows:** run the whole flow under **WSL** (then `--install-cron` works
-     as-is), or native Task Scheduler:
+4. **Schedule the babysitter:** `.claude/ai-review-babysit.sh --install-cron`
+   (idempotent) — it picks the right scheduler per OS:
+   - **macOS → LaunchAgent, deliberately NOT cron:** `gh` and `claude` keep their
+     credentials in the login Keychain, which plain cron's session cannot access —
+     a cron-scheduled sweep dies with HTTP 401 (observed live). The LaunchAgent runs
+     inside your GUI session where the Keychain works, fires every 30 min plus once
+     at install (self-verifying).
+   - **Linux → crontab** (credentials are file-based; cron is fine).
+   - **Windows:** run the whole flow under **WSL** (then it's the Linux path), or
+     native Task Scheduler:
      `schtasks /Create /SC MINUTE /MO 30 /TN ai-review-babysit /TR "bash -lc 'cd /path/to/repo && .claude/ai-review-babysit.sh >> ~/.ai-review-kit-babysit.log 2>&1'"`
-   - Desktop notifications degrade per OS: macOS `osascript` → Linux `notify-send` →
-     plain log line.
+   - Schedulers only fire while the machine is awake; missed ticks are harmless —
+     the sweep is stateless and the next tick reconciles from GitHub. Desktop
+     notifications degrade per OS: macOS `osascript` → Linux `notify-send` → log line.
 
 Per-teammate: each developer repeats steps 1–2 + 4 on their machine (the repo-side
 install from step 3 is shared, committed once). One always-on machine running the

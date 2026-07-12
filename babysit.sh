@@ -39,23 +39,55 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
 NOTIFY="$(cd "$(dirname "$0")" && pwd)/ai-review-notify.sh"
 [ -x "$NOTIFY" ] || NOTIFY=""
 
-# --install-cron: schedule THIS repo's sweep every 30 min, idempotently (macOS/Linux —
-# anywhere with a cron daemon; Windows users: run under WSL, or see README for a Task
-# Scheduler equivalent). The job invokes this script by its resolved absolute path, so
-# it works for the repo-installed copy and a shared kit clone alike.
+# --install-cron: schedule THIS repo's sweep every 30 min, idempotently.
+#   macOS  → LaunchAgent, NOT crontab: gh and claude store credentials in the login
+#            Keychain, which plain cron's session cannot access (observed live: every
+#            cron sweep died with HTTP 401). A user LaunchAgent runs inside the GUI
+#            session where the Keychain is available. RunAtLoad fires one sweep
+#            immediately so the install verifies itself.
+#   Linux  → crontab (credentials are file-based there; cron works fine).
+#   Windows→ WSL (then this is the Linux path), or Task Scheduler per README.
+# The job invokes this script by its resolved absolute path, so it works for the
+# repo-installed copy and a shared kit clone alike.
 if [ "${1:-}" = "--install-cron" ]; then
   SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
-  LINE="*/30 * * * * cd $(pwd) && $SELF >> \"\$HOME/.ai-review-kit-babysit.log\" 2>&1"
-  if ! command -v crontab >/dev/null 2>&1; then
-    echo "no crontab on this system — schedule manually (README § Portability)"; exit 1
-  fi
-  if crontab -l 2>/dev/null | grep -qF "cd $(pwd) "; then
-    echo "already scheduled — a crontab entry for $(pwd) exists:"
-    crontab -l | grep -F "cd $(pwd) "
+  if [ "$(uname)" = "Darwin" ]; then
+    LABEL="com.ai-review-kit.babysit.$(basename "$(pwd)")"
+    PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+    mkdir -p "$HOME/Library/LaunchAgents"
+    cat > "$PLIST" <<PLIST_EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>$LABEL</string>
+  <key>ProgramArguments</key><array>
+    <string>/bin/bash</string><string>-c</string>
+    <string>cd '$(pwd)' && '$SELF'</string>
+  </array>
+  <key>StartInterval</key><integer>1800</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>$HOME/.ai-review-kit-babysit.log</string>
+  <key>StandardErrorPath</key><string>$HOME/.ai-review-kit-babysit.log</string>
+</dict></plist>
+PLIST_EOF
+    launchctl bootout "gui/$(id -u)" "$PLIST" 2>/dev/null || true
+    launchctl bootstrap "gui/$(id -u)" "$PLIST"
+    echo "installed LaunchAgent $LABEL (every 30 min + one run now)"
+    echo "log: ~/.ai-review-kit-babysit.log · status: launchctl list | grep ai-review-kit"
+    echo "NOTE: remove any old crontab line for this repo — cron cannot reach the Keychain."
   else
-    (crontab -l 2>/dev/null; echo "$LINE") | crontab -
-    echo "installed: $LINE"
-    echo "log: ~/.ai-review-kit-babysit.log · view schedule: crontab -l"
+    LINE="*/30 * * * * cd $(pwd) && $SELF >> \"\$HOME/.ai-review-kit-babysit.log\" 2>&1"
+    if ! command -v crontab >/dev/null 2>&1; then
+      echo "no crontab on this system — schedule manually (README § Portability)"; exit 1
+    fi
+    if crontab -l 2>/dev/null | grep -qF "cd $(pwd) "; then
+      echo "already scheduled — a crontab entry for $(pwd) exists:"
+      crontab -l | grep -F "cd $(pwd) "
+    else
+      (crontab -l 2>/dev/null; echo "$LINE") | crontab -
+      echo "installed: $LINE"
+      echo "log: ~/.ai-review-kit-babysit.log · view schedule: crontab -l"
+    fi
   fi
   exit 0
 fi
