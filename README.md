@@ -99,14 +99,17 @@ Then the manual steps the script prints:
    (Settings → Rulesets; private repos need Pro/Team, public free). Without it the
    status is visual — don't merge on red.
 5. **Babysitter (per developer, once) — cron is the recommended path:**
-   `*/30 * * * * cd /abs/path/to/repo && .claude/ai-review-babysit.sh >> "$HOME/.ai-review-kit-babysit.log" 2>&1`
-   Prompt-free by construction (permissions decided at launch: explicit allowlist +
-   hard deny-layer), agent-agnostic via `AI_CLI`, single-flight locked, and desktop
-   notifications via the bundled `ai-review-notify.sh` helper. Default scope: PRs you
-   authored; `--all` covers every open PR in the repo.
-   (Alternative: a Claude Code scheduled task — but it runs under your interactive
-   permission settings and will prompt on anything not pre-allowed. Don't run both;
-   the scheduled task doesn't take the script's lock.)
+   ```bash
+   .claude/ai-review-babysit.sh --install-cron   # from the repo root; idempotent
+   ```
+   That schedules a sweep every 30 min. Prompt-free by construction (permissions
+   decided at launch: explicit allowlist + hard deny-layer), agent-agnostic via
+   `AI_CLI`, single-flight locked, and desktop notifications via the bundled
+   `ai-review-notify.sh` helper. Default sweep scope: PRs you authored; `--all`
+   covers every open PR in the repo.
+   (Do NOT use a Claude Code scheduled task for this — it runs under interactive
+   permission settings, prompts on anything not pre-allowed, and doesn't take the
+   script's lock.)
 
 ## The fix loop
 
@@ -128,6 +131,32 @@ round cap (3) with an open P0/P1, or an unverifiable P0/P1 fix. **It never merge
 One identity requirement: the `gh` login that posts `@codex review` must belong to a
 Codex-connected human — Codex rejects CI-bot triggers (tested live), which is why CI
 cannot fire Codex and the loop/babysitter (running as you) is the trigger mechanism.
+
+## Portability — new machine, any OS, any teammate
+
+Everything is plain bash + the `gh`/`claude` CLIs — nothing is tied to one machine.
+Full bootstrap on a fresh box:
+
+1. **Install the CLIs:** [`gh`](https://cli.github.com) (any OS),
+   [`claude`](https://claude.com/claude-code) (macOS/Linux/Windows), `jq`, `git`, bash.
+2. **Authenticate as yourself:** `gh auth login`, `claude` (login once interactively).
+   Secrets (`CLAUDE_CODE_OAUTH_TOKEN`, `LINEAR_API_KEY`) live in the GitHub repo —
+   nothing secret is stored on the machine beyond your own CLI logins.
+3. **Clone the kit** and run `setup.sh` in each target repo (idempotent — re-running
+   on an already-installed repo is safe and refreshes the scripts).
+4. **Schedule the babysitter:**
+   - **macOS / Linux:** `.claude/ai-review-babysit.sh --install-cron` (idempotent).
+     Note: cron fires only while the machine is awake; missed ticks are harmless —
+     the sweep is stateless and the next tick reconciles from GitHub.
+   - **Windows:** run the whole flow under **WSL** (then `--install-cron` works
+     as-is), or native Task Scheduler:
+     `schtasks /Create /SC MINUTE /MO 30 /TN ai-review-babysit /TR "bash -lc 'cd /path/to/repo && .claude/ai-review-babysit.sh >> ~/.ai-review-kit-babysit.log 2>&1'"`
+   - Desktop notifications degrade per OS: macOS `osascript` → Linux `notify-send` →
+     plain log line.
+
+Per-teammate: each developer repeats steps 1–2 + 4 on their machine (the repo-side
+install from step 3 is shared, committed once). One always-on machine running the
+babysitter with `--all` can cover a whole team instead.
 
 ## Which coding agent do you develop with?
 

@@ -112,8 +112,9 @@ if [ "$CODEX" = 1 ]; then
 fi
 echo "[gate]   optional but recommended: require status check 'merge-gate' on the"
 echo "         default branch (Settings -> Rulesets; private repos need Pro/Team)."
-echo "[loop]   babysitter cron (per developer, once):  crontab -e   then add:"
-echo "         */30 * * * * cd $(pwd) && .claude/ai-review-babysit.sh >> \$HOME/.ai-review-kit-babysit.log 2>&1"
+echo "[loop]   babysitter cron (per developer, once):"
+echo "         .claude/ai-review-babysit.sh --install-cron    (idempotent; macOS/Linux)"
+echo "         Windows: WSL, or Task Scheduler — see README § Portability."
 echo "         (prompt-free: permissions are decided by the script's launch flags."
 echo "          Do NOT use a Claude Code scheduled task for this — interactive"
 echo "          permission prompts stall it and it bypasses the script's lock."
