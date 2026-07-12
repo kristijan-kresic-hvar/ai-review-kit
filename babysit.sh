@@ -39,6 +39,27 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
 NOTIFY="$(cd "$(dirname "$0")" && pwd)/ai-review-notify.sh"
 [ -x "$NOTIFY" ] || NOTIFY=""
 
+# --install-cron: schedule THIS repo's sweep every 30 min, idempotently (macOS/Linux —
+# anywhere with a cron daemon; Windows users: run under WSL, or see README for a Task
+# Scheduler equivalent). The job invokes this script by its resolved absolute path, so
+# it works for the repo-installed copy and a shared kit clone alike.
+if [ "${1:-}" = "--install-cron" ]; then
+  SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+  LINE="*/30 * * * * cd $(pwd) && $SELF >> \"\$HOME/.ai-review-kit-babysit.log\" 2>&1"
+  if ! command -v crontab >/dev/null 2>&1; then
+    echo "no crontab on this system — schedule manually (README § Portability)"; exit 1
+  fi
+  if crontab -l 2>/dev/null | grep -qF "cd $(pwd) "; then
+    echo "already scheduled — a crontab entry for $(pwd) exists:"
+    crontab -l | grep -F "cd $(pwd) "
+  else
+    (crontab -l 2>/dev/null; echo "$LINE") | crontab -
+    echo "installed: $LINE"
+    echo "log: ~/.ai-review-kit-babysit.log · view schedule: crontab -l"
+  fi
+  exit 0
+fi
+
 # Single-flight lock: a sweep can legitimately outlive the cron interval (the playbook
 # bounds each reviewer wait at ~20 min and caps re-fires, but a multi-PR round chains
 # several waits), so an unguarded cron overlaps two agents on the same PRs (double
