@@ -27,10 +27,14 @@
 set -euo pipefail
 [ -f .github/ai-review-loop.md ] || { echo "run from a repo with ai-review-kit installed"; exit 1; }
 
-# Single-flight lock: a sweep can legitimately run >30 min (bounded reviewer waits),
-# so an unguarded cron overlaps two agents on the same PRs (double nudges, out-of-order
-# resolves). mkdir is the portable atomic primitive (no flock on macOS). A lock older
-# than 2h is stale (crashed run) and is stolen.
+# Single-flight lock: a sweep can legitimately outlive the cron interval (the playbook
+# bounds each reviewer wait at ~20 min and caps re-fires, but a multi-PR round chains
+# several waits), so an unguarded cron overlaps two agents on the same PRs (double
+# nudges, out-of-order resolves). mkdir is the portable atomic primitive (no flock on
+# macOS). A lock older than 2h is stale: that exceeds every in-loop bound combined —
+# a run past it is crashed or hung, not working. NOTE: the agent launches below run
+# WITHOUT exec — exec would replace the shell and skip the EXIT trap, leaving the lock
+# held after every successful sweep (caught in live review).
 LOCK=".claude/.babysit.lock"
 if ! mkdir "$LOCK" 2>/dev/null; then
   if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +120 2>/dev/null)" ]; then
@@ -41,6 +45,12 @@ if ! mkdir "$LOCK" 2>/dev/null; then
   fi
 fi
 trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
+
+# Unattended agents never run over uncommitted human work: a write-capable sweep in a
+# dirty checkout can sweep local changes into PR-branch commits. Fail quiet, fail closed.
+if [ -n "$(git status --porcelain)" ]; then
+  echo "working tree dirty — refusing unattended sweep (commit/stash first)"; exit 0
+fi
 
 SCOPE="authored by me (--author @me)"
 [ "${1:-}" = "--all" ] && SCOPE="by ANY author"
@@ -71,13 +81,13 @@ case "$AI_CLI" in
     # denies cover bare pushes (branch inferred from a default-branch checkout)
     # and ANY refspec containing main/master (`origin HEAD:main`); branch names
     # containing 'main'/'master' over-block — fail-closed, rename the branch.
-    exec claude -p "$PROMPT" \
+    claude -p "$PROMPT" \
       --allowedTools "Skill,Read,Glob,Grep,Edit,Write,Bash(jq:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr checks:*),Bash(gh api:*),Bash(gh search:*),Bash(gh workflow run:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git worktree:*),Bash(git checkout:*),Bash(git fetch:*)" \
       --disallowedTools "Bash(gh pr merge:*),Bash(gh api* -X *),Bash(gh api*--method*),Bash(gh api*/merge*),Bash(gh api*merges*),Bash(gh api*mergePullRequest*),Bash(gh api*createCommitOnBranch*),Bash(gh api*updateRef*),Bash(gh api*deleteRef*),Bash(gh api*createRef*),Bash(gh api*/git/*),Bash(git push),Bash(git push origin),Bash(git push origin HEAD),Bash(git push -u origin HEAD),Bash(git push*HEAD),Bash(git push*main*),Bash(git push*master*)" ;;
   codex)
     # --full-auto: workspace-write + on-request network; make sure your Codex config
     # allows gh/git in this repo or the sweep stalls on approvals.
-    exec codex exec --full-auto "$PROMPT" ;;
+    codex exec --full-auto "$PROMPT" ;;
   *)
-    exec $AI_CLI "$PROMPT" ;;
+    $AI_CLI "$PROMPT" ;;
 esac

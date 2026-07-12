@@ -62,13 +62,21 @@ could settle.
   resolve). Never silently drop it.
   **Rebuttal exception:** a non-self reply NEWER than your last disposition reply in
   any thread (open or resolved) is live input — a human's is a directive; a reviewer's
-  is a finding to re-triage. Never re-assert a prior disposition over a rebuttal, and
-  never touch a thread whose latest self-reply starts `escalated to human`.
+  is a finding to re-triage. Never re-assert a prior disposition over a rebuttal.
+  Escalated threads follow the same precedence: leave one alone ONLY while its latest
+  reply is your own `escalated to human` marker — a HUMAN reply after the marker IS the
+  answer the escalation was waiting for: obey it, then resolve the thread (which lifts
+  the escalation's merge block).
 - **Summary findings too:** `gh api --paginate repos/<o>/<r>/issues/<N>/comments` and
   the review bodies (`gh api --paginate repos/<o>/<r>/pulls/<N>/reviews`) — bot verdict
   bodies can carry findings with no inline thread; humans comment directives there.
   Always `--paginate`: a first-page-only read hides late findings and human directives
   on busy PRs. (gh rejects `--slurp` combined with `--jq` — pipe to `jq` instead.)
+  **Current-head artifacts only:** triage a bot's body findings solely from its LATEST
+  review / most recent head-relevant comment — findings in superseded-head artifacts
+  are history (fixed or restated by the fresh review), and your own posted disposition
+  comments are processed-markers, not findings. Human directives have no head: obey
+  them whenever unanswered.
 - Bot logins differ by API: REST returns `claude[bot]` / `chatgpt-codex-connector[bot]`,
   GraphQL returns them WITHOUT `[bot]`. Accept both forms or you'll match zero threads
   and read real findings as absent.
