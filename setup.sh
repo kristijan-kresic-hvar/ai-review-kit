@@ -17,6 +17,15 @@ done
 [ -d .git ] || { echo "error: run from the target repo's root (no .git here)"; exit 1; }
 mkdir -p .github/workflows
 
+# Branch hygiene: merged PR branches auto-delete (GitHub repo setting). Best-effort —
+# offline/no-gh setups just see the note instead.
+if gh api -X PATCH "repos/$(gh repo view --json nameWithOwner --jq .nameWithOwner)" \
+     -f delete_branch_on_merge=true --silent 2>/dev/null; then
+  echo "enabled delete_branch_on_merge (merged PR branches auto-delete)"
+else
+  echo "NOTE: could not set delete_branch_on_merge — enable it in repo Settings"
+fi
+
 # The gate is always installed — it adapts to whichever legs exist.
 cp "$KIT/workflows/merge-gate.yml" .github/workflows/merge-gate.yml
 echo "installed .github/workflows/merge-gate.yml"
