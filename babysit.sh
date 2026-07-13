@@ -4,8 +4,10 @@
 # reply/resolve threads, re-trigger reviewers, announce converged PRs. Exits quietly
 # when nothing is actionable.
 #
-# Run it manually, or schedule it (every ~30 min) with the built-in installer:
-#   .claude/ai-review-babysit.sh --install-cron     (from the target repo's root)
+# Run it manually, or schedule it (every ~30 min) with the built-in installer —
+# always invoked FROM the target repo's root, running from the kit clone (scripts
+# are never vendored into repos):
+#   path/to/ai-review-kit/babysit.sh --install-cron
 # That picks the right scheduler per OS — LaunchAgent on macOS (plain cron cannot
 # reach the login Keychain where gh/claude keep credentials; observed live as HTTP
 # 401 on every cron sweep), crontab on Linux. Scheduled runs are prompt-free by
