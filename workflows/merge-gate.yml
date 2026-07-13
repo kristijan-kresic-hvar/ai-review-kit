@@ -141,6 +141,12 @@ jobs:
           # Fail-closed: any unhandled error stamps red on the head before the job dies.
           stamp() { D="$2"; gh api "repos/$REPO/statuses/$HEAD_SHA" -f state="$1" -f context=merge-gate -f description="${D:0:135}" --silent; }
           trap 'stamp failure "gate errored — treat as NOT approved"' ERR
+          # Pending-at-start: this run was triggered because something MIGHT have changed
+          # the verdict (a new finding, a dismissal, a retarget). Replace any stale green
+          # with pending NOW, before the ~30s of reads below — otherwise the old green
+          # stays mergeable during re-evaluation. The final verdict overwrites this; if
+          # the job is killed mid-run, pending (not green) is what remains — fail-closed.
+          stamp pending "re-evaluating reviewers on this head"
           # Success may never overwrite a FAILURE stamped by a run that started after us —
           # without a concurrency group an older run can finish last, and its data predates
           # whatever the newer run saw (caught in live adversarial review). Timestamps are
@@ -257,12 +263,17 @@ jobs:
           }
           CODEX_CFG=$(codexCfg)
 
-          # A leg applies when CONFIGURED or the bot has ACTIVITY on this PR.
+          # A leg applies when CONFIGURED or the bot has ACTIVITY on this PR. A Codex
+          # ONBOARDING comment ("To use Codex here, create an environment for this repo")
+          # is posted when Codex is NOT set up — it is the opposite of review activity and
+          # must NOT count, or its bare presence flips the Codex leg on and demands a clean
+          # signal Codex can never produce (no environment = no review), deadlocking a
+          # clean PR red (observed live 2026-07-13). Excluded from the comment leg here.
           CLAUDE_ACTIVE=$(gh api --paginate "repos/$REPO/pulls/$PR_NUM/reviews" \
             --jq "[.[] | select(.user.login == \"claude[bot]\")] | length" | awk '{s+=$1} END {print s+0}')
           CODEX_ACTIVE=$(( \
             $(gh api --paginate "repos/$REPO/pulls/$PR_NUM/reviews" --jq "[.[] | select(.user.login == \"$CODEX_REST\")] | length" | awk '{s+=$1} END {print s+0}') + \
-            $(gh api --paginate "repos/$REPO/issues/$PR_NUM/comments" --jq "[.[] | select(.user.login == \"$CODEX_REST\")] | length" | awk '{s+=$1} END {print s+0}') + \
+            $(gh api --paginate "repos/$REPO/issues/$PR_NUM/comments" --jq "[.[] | select(.user.login == \"$CODEX_REST\") | select((.body | test(\"to use codex here|create an environment for this repo\"; \"i\")) | not)] | length" | awk '{s+=$1} END {print s+0}') + \
             $(gh api --paginate "repos/$REPO/issues/$PR_NUM/reactions" --jq "[.[] | select(.user.login == \"$CODEX_REST\")] | length" | awk '{s+=$1} END {print s+0}') ))
 
           # Threads are shared gate state (not Codex-only): the playbook's escalation
@@ -335,10 +346,13 @@ jobs:
             # latest REVIEW on the PR (a findings review after an old clean supersedes
             # it), and Codex's latest NON-clean issue comment (an error/notice after a
             # clean means the clean is no longer the last word — fail closed, re-trigger).
+            # NON-clean comments use max(updated_at, created_at): a stale comment EDITED
+            # to add a finding after a clean must push the cutoff forward, else the edit
+            # is missed and the old clean stays authoritative.
             CODEX_LAST_REVIEW=$(gh api --paginate --slurp "repos/$REPO/pulls/$PR_NUM/reviews" \
               | jq -r "[add[] | select(.user.login == \"$CODEX_REST\") | .submitted_at] | max // \"\"")
             CODEX_LAST_OTHER=$(gh api --paginate --slurp "repos/$REPO/issues/$PR_NUM/comments" \
-              | jq -r "[add[] | select(.user.login == \"$CODEX_REST\") | select(.body | test(\"didn'?t find any major issues\"; \"i\") | not) | .created_at] | max // \"\"")
+              | jq -r "[add[] | select(.user.login == \"$CODEX_REST\") | select(.body | test(\"didn'?t find any major issues\"; \"i\") | not) | ([.updated_at, .created_at] | max)] | max // \"\"")
             CODEX_CUTOFF="$BASE_CUTOFF"
             [ "$CODEX_LAST_REVIEW" \> "$CODEX_CUTOFF" ] && CODEX_CUTOFF="$CODEX_LAST_REVIEW"
             [ "$CODEX_LAST_OTHER" \> "$CODEX_CUTOFF" ] && CODEX_CUTOFF="$CODEX_LAST_OTHER"
@@ -378,6 +392,23 @@ jobs:
           if [ "$WAIVED" -eq 1 ] && [ -z "$CODEX_CFG" ] && [ "$CODEX_ACTIVE" -eq 0 ]; then
             PROBLEMS="${PROBLEMS}self-edit waiver leaves ZERO reviewers — merge via the web UI after personal review. "
           fi
+
+          # Commit-status is COMMIT-scoped, not PR-scoped: the single `merge-gate` status
+          # lives on HEAD_SHA and shows in EVERY open PR whose head is this commit. Two
+          # PRs sharing a head (same branch, different bases) would overwrite each other —
+          # a clean PR's green would mask a failing sibling. GitHub exposes no PR-scoped
+          # status context (branch protection needs a fixed context name), so fail CLOSED
+          # when siblings exist: any open PR beyond this one sharing the head goes red,
+          # merge via the web UI after checking each PR's own reviews. (Rare: one branch
+          # rarely backs two open PRs. The common single-PR case counts exactly 1.)
+          # The `.head.sha == HEAD_SHA` filter is load-bearing: commits/<sha>/pulls returns
+          # every open PR that CONTAINS the commit (including as an ancestor), so a stacked
+          # PR whose branch was cut from this one would false-match on the shared status it
+          # does NOT actually collide on. Only a PR whose HEAD equals this commit collides.
+          SIBLINGS=$(gh api --paginate "repos/$REPO/commits/$HEAD_SHA/pulls" \
+            --jq "[.[] | select(.state == \"open\") | select(.head.sha == \"$HEAD_SHA\") | select(.number != $PR_NUM)] | length" \
+            | awk '{s+=$1} END {print s+0}')
+          [ "$SIBLINGS" -gt 0 ] && PROBLEMS="${PROBLEMS}${SIBLINGS} other open PR(s) share this head commit — the shared status can't isolate them; merge via the web UI after checking each PR. "
 
           if [ -z "$CLAUDE_CFG" ] && [ -z "$CODEX_CFG" ] && [ "$CLAUDE_ACTIVE" -eq 0 ] && [ "$CODEX_ACTIVE" -eq 0 ]; then
             stampOk "no AI reviewers configured or active — gate not applicable"

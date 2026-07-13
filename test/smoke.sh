@@ -30,6 +30,9 @@ check() { # check <name> <cond...>
 # Isolate all runtime state (RUNDIR is derived from XDG_CACHE_HOME).
 export XDG_CACHE_HOME="$TMP/cache"
 export HOME="$TMP/home"; mkdir -p "$HOME"
+# A caller's AI_CLI would route the sweep away from our `claude` stub to a real agent —
+# the isolation claim depends on unsetting it.
+unset AI_CLI
 
 # --- stubs ---------------------------------------------------------------------
 mkdir -p "$TMP/bin"
@@ -55,7 +58,12 @@ for a in "$@"; do
 done
 touch agent-was-here
 EOF
-chmod +x "$TMP/bin/gh" "$TMP/bin/claude"
+# Stub the notifier backends: the runner-failure path below delivers a real
+# notification, and unstubbed osascript/notify-send would pop a live desktop popup
+# (the notify helper is invoked by absolute path, but its backends resolve via PATH).
+printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/bin/osascript"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/bin/notify-send"
+chmod +x "$TMP/bin/gh" "$TMP/bin/claude" "$TMP/bin/osascript" "$TMP/bin/notify-send"
 export PATH="$TMP/bin:$PATH"
 export STUB_CWD_OUT="$TMP/stub-cwd" STUB_PROMPT_OUT="$TMP/stub-prompt" STUB_ARGS_OUT="$TMP/stub-args"
 
@@ -118,6 +126,15 @@ grep -q "git push\*trunk\*" "$STUB_ARGS_OUT" \
 grep -q "git push\*--force\*" "$STUB_ARGS_OUT" \
   && check "deny layer carries the force-push deny" true \
   || check "deny layer carries the force-push deny" false
+
+# --- runner failure propagates a nonzero exit (else cron records a crash as success) --
+cat > "$TMP/bin/claude" <<'EOF'
+#!/usr/bin/env bash
+exit 7
+EOF
+chmod +x "$TMP/bin/claude"
+RC=0; "$KIT/babysit.sh" >/dev/null 2>&1 || RC=$?
+check "runner failure propagates as nonzero exit" test "$RC" -eq 7
 
 # --- 4: single-flight lock -------------------------------------------------------
 LOCKDIR="$RUNDIR/lock"

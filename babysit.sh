@@ -58,13 +58,18 @@ for arg in "$@"; do
 done
 [ -f .github/ai-review-loop.md ] || { echo "run from a repo with ai-review-kit installed"; exit 1; }
 
-# Per-repo runtime dir OUTSIDE the checkout (keyed by checkout path, like the
-# LaunchAgent label). Runtime state inside the repo was a live P0: the lock's owner
-# file made `git status` dirty, and every sweep refused itself on its own lock.
-# pwd -P: the key must be the PHYSICAL path — symlink/case//tmp-alias spellings of the
-# same checkout would otherwise get separate locks and sweep the same PRs concurrently.
-RUNDIR="${XDG_CACHE_HOME:-$HOME/.cache}/ai-review-kit/$(printf %s "$(pwd -P)" | cksum | cut -d' ' -f1)"
+# Per-repo runtime dir OUTSIDE the checkout. Runtime state inside the repo was a live
+# P0: the lock's owner file made `git status` dirty, and every sweep refused itself on
+# its own lock. Keyed on the git COMMON dir (shared by every linked worktree of the
+# repo), so a symlink/case/tmp-alias spelling AND a second worktree of the same repo
+# all resolve to ONE lock — else two spellings would sweep the same PRs concurrently.
+# --path-format=absolute (git 2.31+) gives a canonical key; fall back to pwd -P.
+GITID=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+[ -n "$GITID" ] || GITID=$(pwd -P)
+RUNDIR="${XDG_CACHE_HOME:-$HOME/.cache}/ai-review-kit/$(printf %s "$GITID" | cksum | cut -d' ' -f1)"
 mkdir -p "$RUNDIR"
+# 0700: the cache path leaks a private checkout's location on a multi-user box.
+chmod 700 "$RUNDIR" "$(dirname "$RUNDIR")" 2>/dev/null || true
 
 # Desktop notifications — marker-file protocol, NO executable entry point for the
 # agent: an allowlisted script inside a writable tree would be a self-rewritable
@@ -89,10 +94,16 @@ NOTIFY_MARKER="$RUNDIR/notify"
 # repo-installed copy and a shared kit clone alike.
 if [ -n "$INSTALL_CRON" ]; then
   SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
-  # Fail closed on quote-bearing paths/values: the generated bash -c / cron command
-  # single-quotes them, and a value containing ' would break out of the quoting. Rare
-  # enough that refusing beats shipping a shell-escaping library.
-  case "$(pwd)$SELF${AI_CLI:-}" in *"'"*) echo "checkout, kit path, or AI_CLI contains a single quote — unsupported for scheduling; move/rename and retry"; exit 1 ;; esac
+  # Fail closed on paths/values that can't be safely embedded in the generated cron
+  # line / launchd plist, rather than shipping a shell-escaping + XML-escaping library:
+  #  - single quote breaks the cron/bash-c single-quoting
+  #  - control chars (incl. newline) corrupt a crontab entry
+  #  - & < > break the plist's XML <string> (plutil -lint would reject it anyway)
+  case "$(pwd)$SELF${AI_CLI:-}" in
+    *"'"*)            echo "checkout, kit path, or AI_CLI contains a single quote — unsupported for scheduling; move/rename and retry"; exit 1 ;;
+    *[[:cntrl:]]*)    echo "checkout, kit path, or AI_CLI contains a control character — unsupported for scheduling"; exit 1 ;;
+    *"&"*|*"<"*|*">"*) echo "checkout, kit path, or AI_CLI contains & < or > — unsupported for scheduling (breaks the launchd plist)"; exit 1 ;;
+  esac
   SCHED_ARGS=""
   for arg in "$@"; do [ "$arg" = "--all" ] && SCHED_ARGS=" --all"; done
   # Persist a non-default AI_CLI into the scheduled command — without this,
@@ -178,10 +189,19 @@ fi
 # held after every successful sweep (caught in live review).
 LOCK="$RUNDIR/lock"
 if ! mkdir "$LOCK" 2>/dev/null; then
-  if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +120 2>/dev/null)" ]; then
-    echo "stealing stale lock (>2h old)"; rm -rf "$LOCK" 2>/dev/null || true
+  STALE=$(find "$LOCK" -maxdepth 0 -mmin +120 2>/dev/null)
+  OWNER=$(cat "$LOCK/owner" 2>/dev/null || true)
+  # Steal ONLY if the lock is >2h old AND its owner process is gone. The liveness
+  # check is the fix for a real hole: a genuinely-hung >2h sweep is still holding
+  # real PRs, so blindly stealing put TWO live agents on the same PRs. Same-host by
+  # construction (LaunchAgent/cron), so `kill -0 <pid>` is a valid liveness probe.
+  # (PID-reuse edge: a reused pid reads as alive and we skip the sweep — fail-closed,
+  # next tick retries; clear a truly wedged lock by hand: rm -rf the lock dir.)
+  if [ -n "$STALE" ] && { [ -z "$OWNER" ] || ! kill -0 "$OWNER" 2>/dev/null; }; then
+    echo "stealing stale lock (>2h old, owner ${OWNER:-unknown} not alive)"; rm -rf "$LOCK" 2>/dev/null || true
     mkdir "$LOCK" 2>/dev/null || { echo "another sweep is running — exiting"; exit 0; }
   else
+    [ -n "$STALE" ] && echo "lock >2h but owner $OWNER still alive — not stealing (long sweep in progress)"
     echo "another sweep is running — exiting"; exit 0
   fi
 fi
@@ -189,7 +209,9 @@ fi
 # sweep outliving the 2h stale-steal would, on eventually exiting, delete the stealing
 # run's lock — letting a third sweep overlap the second on the same PRs.
 echo "$$" > "$LOCK/owner"
-trap '[ "$(cat "$LOCK/owner" 2>/dev/null)" = "$$" ] && { [ -n "${WT:-}" ] && { git worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"; git worktree prune 2>/dev/null; }; rm -rf "$LOCK" 2>/dev/null; }; [ -n "$NOTIFY_SNAP" ] && rm -rf "$(dirname "$NOTIFY_SNAP")" 2>/dev/null; true' EXIT
+# unlock before remove: a locked worktree survives `remove --force` and leaves admin
+# metadata that fails the next `worktree add`. Only the lock-owning process cleans up.
+trap '[ "$(cat "$LOCK/owner" 2>/dev/null)" = "$$" ] && { [ -n "${WT:-}" ] && { git worktree unlock "$WT" 2>/dev/null || true; git worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"; git worktree prune 2>/dev/null; }; rm -rf "$LOCK" 2>/dev/null; }; [ -n "$NOTIFY_SNAP" ] && rm -rf "$(dirname "$NOTIFY_SNAP")" 2>/dev/null; true' EXIT
 
 # Stale-marker cleanup INSIDE the lock — done pre-lock, a second launch would wipe the
 # still-running first sweep's queued notifications before bouncing off the lock.
@@ -217,10 +239,14 @@ git cat-file -e "origin/$DEFAULT_BRANCH:.github/ai-review-loop.md" 2>/dev/null \
 git worktree prune 2>/dev/null || true
 WT="$RUNDIR/tree"
 if [ -e "$WT" ]; then
+  git worktree unlock "$WT" 2>/dev/null || true
   git worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"
   git worktree prune 2>/dev/null || true
 fi
 git worktree add --detach "$WT" "origin/$DEFAULT_BRANCH" >/dev/null
+# A repo-level sparse-checkout config would hand the agent a worktree missing source
+# files; force a full checkout so it always sees the whole tree.
+git -C "$WT" sparse-checkout disable 2>/dev/null || true
 
 # Snapshot the notify helper only now — every early-exit above leaks nothing, and the
 # EXIT trap (armed with the lock) owns the cleanup from here on.
@@ -246,6 +272,7 @@ fi
 # codex is wired but has less mileage — verify one sweep manually before cron.
 # Any other value is executed verbatim with the prompt appended: unsupported, no promises.
 AI_CLI="${AI_CLI:-claude}"
+RUNNER_RC=0
 case "$AI_CLI" in
   claude)
     # disallowedTools = defense-in-depth (deny beats allow in Claude Code's
@@ -279,7 +306,7 @@ case "$AI_CLI" in
     ( cd "$WT" && claude -p "$PROMPT" \
       --allowedTools "$ALLOWED" \
       --disallowedTools "Bash(gh pr merge:*),Bash(gh api* -X *),Bash(gh api*--method*),Bash(gh api*/merge*),Bash(gh api*merges*),Bash(gh api*mergePullRequest*),Bash(gh api*createCommitOnBranch*),Bash(gh api*updateRef*),Bash(gh api*deleteRef*),Bash(gh api*createRef*),Bash(gh api*/git/*),Bash(git push),Bash(git push origin),Bash(git push origin HEAD),Bash(git push -u origin HEAD),Bash(git push*HEAD),Bash(git push*--force*),Bash(git push*-f *),Bash(git push*main*),Bash(git push*master*),Bash(git push*${DEFAULT_BRANCH}*)" ) \
-      || { echo "[babysit] claude exited non-zero"; echo "ai-review-kit: sweep runner FAILED — check ~/.ai-review-kit-babysit.log" >> "$NOTIFY_MARKER"; } ;;
+      || RUNNER_RC=$? ;;
   codex)
     # --full-auto: workspace-write + on-request network. Smoke-tested 2026-07-13: an
     # idle sweep works OUT OF THE BOX — the sandbox blocks gh's network, and Codex
@@ -291,12 +318,19 @@ case "$AI_CLI" in
     # prompt-level only, enforced by Codex's own sandbox/approval config, not by this
     # script. Verify one FIX round interactively before trusting it to cron.
     ( cd "$WT" && codex exec --full-auto "$PROMPT" ) \
-      || { echo "[babysit] codex exited non-zero"; echo "ai-review-kit: sweep runner FAILED — check ~/.ai-review-kit-babysit.log" >> "$NOTIFY_MARKER"; } ;;
+      || RUNNER_RC=$? ;;
   *)
     # Executed verbatim with the prompt appended: unsupported, no guardrails, no promises.
     ( cd "$WT" && $AI_CLI "$PROMPT" ) \
-      || { echo "[babysit] $AI_CLI exited non-zero"; echo "ai-review-kit: sweep runner FAILED — check ~/.ai-review-kit-babysit.log" >> "$NOTIFY_MARKER"; } ;;
+      || RUNNER_RC=$? ;;
 esac
+# A nonzero runner exit is a FAILED sweep — notify, and (below) exit nonzero so cron/
+# launchd and any monitoring see the failure. Swallowing it into exit 0 (the old
+# behavior) made every crashed sweep look successful.
+if [ "$RUNNER_RC" -ne 0 ]; then
+  echo "[babysit] $AI_CLI exited $RUNNER_RC"
+  echo "ai-review-kit: sweep runner FAILED (exit $RUNNER_RC) — check ~/.ai-review-kit-babysit.log" >> "$NOTIFY_MARKER"
+fi
 
 # Deliver queued notifications from the marker file — via the pre-run read-only
 # snapshot, never an agent-writable copy. First 3 delivered (each line truncated),
@@ -316,3 +350,7 @@ if [ -n "$NOTIFY_SNAP" ] && [ -f "$NOTIFY_MARKER" ]; then
   [ "$TOTAL" -gt 3 ] && "$NOTIFY_SNAP" "ai-review-kit: +$((TOTAL - 3)) more events — see ~/.ai-review-kit-babysit.log"
   rm -f "$NOTIFY_MARKER"
 fi
+
+# Propagate the runner's exit status: a failed sweep must exit nonzero so the scheduler
+# and monitoring don't record a crash as success. Cleanup runs via the EXIT trap.
+exit "$RUNNER_RC"

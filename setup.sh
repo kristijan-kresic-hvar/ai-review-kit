@@ -85,9 +85,16 @@ if [ "$CODEX" = 1 ]; then
     if grep -Eq '^##[[:space:]]+Code Review Rules' AGENTS.md; then
       echo "AGENTS.md already has '## Code Review Rules' — left as is"
     else
-      echo "NOTE: AGENTS.md exists but lacks '## Code Review Rules' — the gate will NOT"
-      echo "      treat this repo as Codex-enabled until you add that section."
-      echo "      Template: $KIT/AGENTS.md.example"
+      # APPEND the managed section rather than printing a note and exiting 0: a note
+      # was silently skippable, leaving Codex uninstalled while the gate reads the repo
+      # as "no Codex leg" and greens as not-applicable. Append it, then VERIFY — if it
+      # still isn't detectable, fail nonzero (never claim --codex succeeded when it
+      # didn't). The '## Code Review Rules' section is the last one in the example.
+      echo "AGENTS.md lacks '## Code Review Rules' — appending the managed section"
+      { echo; sed -n '/^## Code Review Rules/,$p' "$KIT/AGENTS.md.example"; } >> AGENTS.md
+      grep -Eq '^##[[:space:]]+Code Review Rules' AGENTS.md \
+        || { echo "error: failed to add '## Code Review Rules' to AGENTS.md — Codex leg NOT enabled"; exit 1; }
+      echo "appended '## Code Review Rules' to AGENTS.md (review the merged result)"
     fi
     if ! grep -Eq '^##[[:space:]]+Pull request workflow' AGENTS.md; then
       echo "NOTE: AGENTS.md lacks the '## Pull request workflow (all agents)' section —"

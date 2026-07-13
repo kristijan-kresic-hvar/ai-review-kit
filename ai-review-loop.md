@@ -121,16 +121,17 @@ before agreeing; performative agreement ships other people's bugs. Classes:
   inside repo B's tree (a PR in a repo with no local clone gets a temp clone or is
   surfaced in the report). The headless babysitter needs neither: its launcher already
   runs you INSIDE a disposable worktree it created from origin's default branch (it
-  says so in its prompt) — work on PR branches right there. **Exact checkout recipe
-  (branch refs are SHARED with the human's checkout — a bare `git checkout <branch>`
-  can silently land on a stale or unpushed local tip):**
-  `git fetch origin <branch> && git checkout -B <branch> origin/<branch>` — `-B` pins
-  the round to origin's true tip and self-heals stale local branches from earlier
-  sweeps. If that checkout is refused ("already used by worktree" — the human is
-  sitting on that branch), NEVER use `--ignore-other-worktrees`; work detached:
-  `git checkout --detach origin/<branch>`, commit, then
-  `git push origin HEAD:<branch>`. Never force-push. Push and leave worktree cleanup
-  to the launcher.
+  says so in its prompt) — work on PR branches right there. **Exact checkout recipe —
+  stay DETACHED, never create or move a local branch ref:**
+  `git fetch origin <branch> && git checkout --detach FETCH_HEAD`, make the fixes,
+  commit on the detached HEAD, then `git push origin HEAD:<branch>`. This is
+  non-negotiable: linked worktrees SHARE `refs/heads`, so a by-name checkout
+  (`git checkout <branch>` or `git checkout -B <branch> …`) moves the shared branch
+  ref and can silently orphan a human's unpushed commit into the reflog — it violates
+  the "never touches your checkout" guarantee. Detached HEAD touches no shared ref.
+  If the push is rejected non-fast-forward, someone advanced the branch: re-fetch and
+  rebuild on the new `FETCH_HEAD` — **never force-push** (it erases their commit).
+  Push and leave worktree cleanup to the launcher.
 - **Fix rounds SHRINK the diff, never grow it.** A valid finding whose fix needs new
   functionality, new files, or a redesign gets the minimal in-PR remedy (or none) plus
   its own follow-up PR/ticket, stated in the reply. Growing a PR mid-review hands the
