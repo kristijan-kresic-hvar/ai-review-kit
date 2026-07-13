@@ -102,6 +102,12 @@ before agreeing; performative agreement ships other people's bugs. Classes:
 - Security / critical-path fixes: apply + verify, and note it in the round's PR comment
   — informing, not asking.
 - Batch the round's fixes into ONE push (each push burns a review run per reviewer).
+- **Fix rounds SHRINK the diff, never grow it.** A valid finding whose fix needs new
+  functionality, new files, or a redesign gets the minimal in-PR remedy (or none) plus
+  its own follow-up PR/ticket, stated in the reply. Growing a PR mid-review hands the
+  next round fresh attack surface — that treadmill is how PRs never converge (observed
+  live: a 3-line docs PR absorbed an evolving script and ate five review rounds).
+  Escalation answers follow the same rule.
 
 **4. Reply + resolve every non-escalated thread.** Match threads on
 `(path, original_line)` — `line` goes null once a fix outdates the hunk. When one file

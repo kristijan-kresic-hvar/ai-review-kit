@@ -39,13 +39,14 @@ mkdir -p .claude/skills/pr-review-loop
 cp "$KIT/skills/pr-review-loop.md" .claude/skills/pr-review-loop/SKILL.md
 echo "installed .claude/skills/pr-review-loop/SKILL.md (Claude Code shim -> playbook)"
 
-# The babysitter — unattended sweep runner for cron/manual use, so PRs opened OUTSIDE
-# Claude Code (web UI, plain terminal) still get the loop. The notify helper is its
-# sibling: the only desktop-notification capability the headless agent gets.
-cp "$KIT/babysit.sh" .claude/ai-review-babysit.sh
-cp "$KIT/ai-review-notify.sh" .claude/ai-review-notify.sh
-chmod +x .claude/ai-review-babysit.sh .claude/ai-review-notify.sh
-echo "installed .claude/ai-review-babysit.sh + ai-review-notify.sh (unattended babysitter — see checklist)"
+# The babysitter is NOT vendored into the repo (since 2026-07-13): it runs from the
+# kit clone — the one executable home. Vendored copies drifted (every kit change
+# needed a sync PR, and each sync PR spawned a fresh review treadmill on the same
+# scripts). Remove stale copies from earlier kit versions so nothing half-old runs.
+if [ -f .claude/ai-review-babysit.sh ] || [ -f .claude/ai-review-notify.sh ]; then
+  rm -f .claude/ai-review-babysit.sh .claude/ai-review-notify.sh
+  echo "removed vendored babysitter scripts (they now run from the kit clone — see checklist)"
+fi
 
 # Review-optimized PR structure for everyone — GitHub pre-fills it on every new PR.
 if [ -f .github/pull_request_template.md ]; then
@@ -112,8 +113,8 @@ if [ "$CODEX" = 1 ]; then
 fi
 echo "[gate]   optional but recommended: require status check 'merge-gate' on the"
 echo "         default branch (Settings -> Rulesets; private repos need Pro/Team)."
-echo "[loop]   babysitter cron (per developer, once):"
-echo "         .claude/ai-review-babysit.sh --install-cron    (idempotent; macOS/Linux)"
+echo "[loop]   babysitter (per developer, once) — runs from YOUR kit clone:"
+echo "         cd $(pwd) && $KIT/babysit.sh --install-cron    (idempotent; macOS/Linux)"
 echo "         Windows: WSL, or Task Scheduler — see README § Portability."
 echo "         (prompt-free: permissions are decided by the script's launch flags."
 echo "          Do NOT use a Claude Code scheduled task for this — interactive"
