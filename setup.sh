@@ -17,6 +17,14 @@ done
 # -e, not -d: linked worktrees and submodules have a .git FILE, and they are valid
 # install targets too.
 [ -e .git ] || { echo "error: run from the target repo's root (no .git here)"; exit 1; }
+# Refuse symlinked destinations: cp/cat >> follow symlinks, so a checkout carrying a
+# symlinked .github/, .claude/, CLAUDE.md, or AGENTS.md would redirect installer
+# writes OUTSIDE the repo. Fail closed rather than resolve.
+for p in .github .github/workflows .github/workflows/merge-gate.yml .github/workflows/code-review.yml \
+         .github/ai-review-loop.md .github/pull_request_template.md \
+         .claude .claude/skills .claude/skills/pr-review-loop .claude/skills/pr-review-loop/SKILL.md CLAUDE.md AGENTS.md; do
+  if [ -L "$p" ]; then echo "error: $p is a symlink — refusing to write through it"; exit 1; fi
+done
 mkdir -p .github/workflows
 
 # Branch hygiene: merged PR branches auto-delete (GitHub repo setting). Best-effort —
