@@ -43,11 +43,7 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
 NOTIFY="$(cd "$(dirname "$0")" && pwd)/ai-review-notify.sh"
 [ -x "$NOTIFY" ] || NOTIFY=""
 NOTIFY_SNAP=""
-if [ -n "$NOTIFY" ]; then
-  SNAP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/ai-review-notify.XXXXXX") &&     cp "$NOTIFY" "$SNAP_DIR/notify.sh" && chmod 555 "$SNAP_DIR/notify.sh" &&     NOTIFY_SNAP="$SNAP_DIR/notify.sh" || NOTIFY_SNAP=""
-fi
 NOTIFY_MARKER=".claude/.babysit-notify"
-rm -f "$NOTIFY_MARKER"
 
 # --install-cron: schedule THIS repo's sweep every 30 min, idempotently.
 #   macOS  → LaunchAgent, NOT crontab: gh and claude store credentials in the login
@@ -73,7 +69,7 @@ if [ "${1:-}" = "--install-cron" ]; then
   <key>Label</key><string>$LABEL</string>
   <key>ProgramArguments</key><array>
     <string>/bin/bash</string><string>-c</string>
-    <string>cd '$(pwd)' && '$SELF'</string>
+    <string>cd '$(pwd)' || exit 1; '$SELF'</string>
   </array>
   <key>StartInterval</key><integer>1800</integer>
   <key>RunAtLoad</key><true/>
@@ -81,6 +77,10 @@ if [ "${1:-}" = "--install-cron" ]; then
   <key>StandardErrorPath</key><string>$HOME/.ai-review-kit-babysit.log</string>
 </dict></plist>
 PLIST_EOF
+    # Strict-parse the generated plist: launchd's parser tolerates invalid XML
+    # (verified live — plutil and xmllint both rejected a file launchd loaded), so
+    # a lint here is the only honest install check.
+    plutil -lint "$PLIST" >/dev/null || { echo "generated plist failed lint — not loading"; exit 1; }
     launchctl bootout "gui/$(id -u)" "$PLIST" 2>/dev/null || true
     launchctl bootstrap "gui/$(id -u)" "$PLIST"
     echo "installed LaunchAgent $LABEL (every 30 min + one run now)"
@@ -94,11 +94,13 @@ PLIST_EOF
     if ! command -v crontab >/dev/null 2>&1; then
       echo "no crontab on this system — schedule manually: kit README § Portability"; echo "  https://github.com/kristijan-kresic-hvar/ai-review-kit#portability--new-machine-any-os-any-teammate"; exit 1
     fi
-    # Idempotency keys on the SCRIPT path, not the checkout path — an unrelated cron
-    # job that merely cd's into this repo (backup, build) must not read as "scheduled".
-    if crontab -l 2>/dev/null | grep -qF "$SELF"; then
-      echo "already scheduled — a babysitter crontab entry exists:"
-      crontab -l | grep -F "$SELF"
+    # Idempotency keys on the exact install fragment — script path alone breaks the
+    # shared-kit-clone-many-repos case (same $SELF for every repo); checkout path
+    # alone false-matches unrelated jobs that cd here. Both together are unambiguous.
+    FRAG="cd '$(pwd)' && '$SELF'"
+    if crontab -l 2>/dev/null | grep -qF "$FRAG"; then
+      echo "already scheduled — this repo's babysitter crontab entry exists:"
+      crontab -l | grep -F "$FRAG"
     else
       (crontab -l 2>/dev/null; echo "$LINE") | crontab -
       echo "installed: $LINE"
@@ -125,12 +127,24 @@ if ! mkdir "$LOCK" 2>/dev/null; then
     echo "another sweep is running — exiting"; exit 0
   fi
 fi
-trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
+trap 'rmdir "$LOCK" 2>/dev/null; [ -n "$NOTIFY_SNAP" ] && rm -rf "$(dirname "$NOTIFY_SNAP")" 2>/dev/null; true' EXIT
+
+# Stale-marker cleanup INSIDE the lock — done pre-lock, a second launch would wipe the
+# still-running first sweep's queued notifications before bouncing off the lock.
+rm -f "$NOTIFY_MARKER"
 
 # Unattended agents never run over uncommitted human work: a write-capable sweep in a
 # dirty checkout can sweep local changes into PR-branch commits. Fail quiet, fail closed.
 if [ -n "$(git status --porcelain)" ]; then
   echo "working tree dirty — refusing unattended sweep (commit/stash first)"; exit 0
+fi
+
+# Snapshot the notify helper only now — every early-exit above leaks nothing, and the
+# EXIT trap (armed with the lock) owns the cleanup from here on.
+if [ -n "$NOTIFY" ]; then
+  SNAP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/ai-review-notify.XXXXXX") \
+    && cp "$NOTIFY" "$SNAP_DIR/notify.sh" && chmod 555 "$SNAP_DIR/notify.sh" \
+    && NOTIFY_SNAP="$SNAP_DIR/notify.sh" || NOTIFY_SNAP=""
 fi
 
 SCOPE="authored by me (--author @me)"
@@ -168,7 +182,7 @@ case "$AI_CLI" in
     ALLOWED="Skill,Read,Glob,Grep,Edit,Write,Bash(jq:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr checks:*),Bash(gh api:*),Bash(gh search:*),Bash(gh workflow run:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git worktree:*),Bash(git checkout:*),Bash(git fetch:*)"
     claude -p "$PROMPT" \
       --allowedTools "$ALLOWED" \
-      --disallowedTools "Bash(gh pr merge:*),Bash(gh api* -X *),Bash(gh api*--method*),Bash(gh api*/merge*),Bash(gh api*merges*),Bash(gh api*mergePullRequest*),Bash(gh api*createCommitOnBranch*),Bash(gh api*updateRef*),Bash(gh api*deleteRef*),Bash(gh api*createRef*),Bash(gh api*/git/*),Bash(git push),Bash(git push origin),Bash(git push origin HEAD),Bash(git push -u origin HEAD),Bash(git push*HEAD),Bash(git push*main*),Bash(git push*master*)" ;;
+      --disallowedTools "Bash(gh pr merge:*),Bash(gh api* -X *),Bash(gh api*--method*),Bash(gh api*/merge*),Bash(gh api*merges*),Bash(gh api*mergePullRequest*),Bash(gh api*createCommitOnBranch*),Bash(gh api*updateRef*),Bash(gh api*deleteRef*),Bash(gh api*createRef*),Bash(gh api*/git/*),Bash(git push),Bash(git push origin),Bash(git push origin HEAD),Bash(git push -u origin HEAD),Bash(git push*HEAD),Bash(git push*main*),Bash(git push*master*)" || echo "[babysit] claude exited non-zero" ;;
   codex)
     # --full-auto: workspace-write + on-request network. Smoke-tested 2026-07-13: an
     # idle sweep works OUT OF THE BOX — the sandbox blocks gh's network, and Codex
@@ -179,10 +193,10 @@ case "$AI_CLI" in
     # is no deny-list equivalent here — the playbook's never-merge/never-main rules are
     # prompt-level only, enforced by Codex's own sandbox/approval config, not by this
     # script. Verify one FIX round interactively before trusting it to cron.
-    codex exec --full-auto "$PROMPT" ;;
+    codex exec --full-auto "$PROMPT" || echo "[babysit] codex exited non-zero" ;;
   *)
     # Executed verbatim with the prompt appended: unsupported, no guardrails, no promises.
-    $AI_CLI "$PROMPT" ;;
+    $AI_CLI "$PROMPT" || echo "[babysit] $AI_CLI exited non-zero" ;;
 esac
 
 # Deliver queued notifications from the marker file — via the pre-run read-only
@@ -194,4 +208,3 @@ if [ -n "$NOTIFY_SNAP" ] && [ -f "$NOTIFY_MARKER" ]; then
   done
   rm -f "$NOTIFY_MARKER"
 fi
-[ -n "$NOTIFY_SNAP" ] && rm -rf "$(dirname "$NOTIFY_SNAP")" || true
