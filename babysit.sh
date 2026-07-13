@@ -46,7 +46,8 @@ NOTIFY="$(cd "$(dirname "$0")" && pwd)/ai-review-notify.sh"
 #            session where the Keychain is available. RunAtLoad fires one sweep
 #            immediately so the install verifies itself.
 #   Linux  → crontab (credentials are file-based there; cron works fine).
-#   Windows→ WSL (then this is the Linux path), or Task Scheduler per README.
+#   Windows→ WSL (then this is the Linux path), or Task Scheduler — see the kit
+#            README § Portability: https://github.com/kristijan-kresic-hvar/ai-review-kit
 # The job invokes this script by its resolved absolute path, so it works for the
 # repo-installed copy and a shared kit clone alike.
 if [ "${1:-}" = "--install-cron" ]; then
@@ -78,7 +79,7 @@ PLIST_EOF
   else
     LINE="*/30 * * * * cd $(pwd) && $SELF >> \"\$HOME/.ai-review-kit-babysit.log\" 2>&1"
     if ! command -v crontab >/dev/null 2>&1; then
-      echo "no crontab on this system — schedule manually (README § Portability)"; exit 1
+      echo "no crontab on this system — schedule manually: kit README § Portability"; echo "  https://github.com/kristijan-kresic-hvar/ai-review-kit#portability--new-machine-any-os-any-teammate"; exit 1
     fi
     if crontab -l 2>/dev/null | grep -qF "cd $(pwd) "; then
       echo "already scheduled — a crontab entry for $(pwd) exists:"
