@@ -4,15 +4,16 @@
 # reply/resolve threads, re-trigger reviewers, announce converged PRs. Exits quietly
 # when nothing is actionable.
 #
-# Run it manually, or on a schedule (every ~30 min) — CRON IS THE RECOMMENDED PATH:
-# permissions are decided at launch by the flags below (allowlist + hard deny-layer),
-# so an unattended run can never stall on a permission prompt, and AI_CLI keeps it
-# agent-agnostic. Works invoked as the repo-installed copy OR straight from the kit
-# clone; either way run it FROM the target repo's root:
-#   crontab -e   →   */30 * * * * cd /abs/path/to/repo && .claude/ai-review-babysit.sh >> "$HOME/.ai-review-kit-babysit.log" 2>&1
-# (A Claude Code scheduled task can do the same job, but it runs with your interactive
-#  permission settings — expect prompts unless those are pre-allowed. Don't run both:
-#  the scheduled task doesn't take this script's lock.)
+# Run it manually, or schedule it (every ~30 min) with the built-in installer:
+#   .claude/ai-review-babysit.sh --install-cron     (from the target repo's root)
+# That picks the right scheduler per OS — LaunchAgent on macOS (plain cron cannot
+# reach the login Keychain where gh/claude keep credentials; observed live as HTTP
+# 401 on every cron sweep), crontab on Linux. Scheduled runs are prompt-free by
+# construction: permissions are decided at launch by the flags below (allowlist +
+# hard deny-layer), and AI_CLI keeps the runner agent-agnostic. Works invoked as the
+# repo-installed copy OR straight from the kit clone; either way run it FROM the
+# target repo's root. (Don't ALSO run a Claude Code scheduled task for sweeping —
+# it prompts under interactive permissions and doesn't take this script's lock.)
 #
 # Needs: `claude` CLI + `gh` CLI authenticated as you. Must run from the repo root
 # (the pr-review-loop skill is project-local). By default it handles PRs YOU authored;
