@@ -1,6 +1,20 @@
 # merge-gate — stamps a commit status (context: "merge-gate") on the PR head, green ONLY
 # when every APPLICABLE AI reviewer is clean on the CURRENT head. A leg applies when its
 # reviewer is configured OR has activity on the PR:
+#
+# PARITY TWIN of the local Claude Code hook linear-pipeline-kit/hooks/merge-gate.mjs.
+# Both enforce the SAME verdict policy (ai-review-loop.md § "Silence is not approval"):
+# this workflow is the server-side twin (stamps the commit status), the hook is the
+# client-side twin (blocks `gh pr merge` locally, ends in 'ask'). They cannot be one file
+# (GitHub Actions YAML vs Node hook), so KEEP THEM IN LOCKSTEP — change one twin's verdict
+# logic and you must change the other + both test surfaces (the hook's merge-gate.test.mjs
+# and this file's live gate-matrix run). Shared verdict rules: (1) Claude APPROVED on head
+# postdating the last base retarget; (2) Codex clean comment naming head, postdating
+# retarget + Codex's last review + its last non-clean comment; (3) unresolved Claude- AND
+# Codex-rooted threads block; (4) any "escalated to human" thread blocks; (5) two open PRs
+# sharing this head commit fail closed; (6) a Codex "create an environment" onboarding
+# notice is NOT review activity.
+#
 #   - Claude: a review by claude[bot], state APPROVED, on the head SHA, AND zero
 #     unresolved claude-rooted threads (an APPROVED verdict does not clear open inline
 #     findings; the thread check applies even when the verdict is waived). Waived (with
