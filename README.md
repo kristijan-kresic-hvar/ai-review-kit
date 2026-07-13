@@ -23,10 +23,11 @@ exactly two things: the merge click, and answering the rare critical escalation.
 
 Everything here ran live before being called done — not simulated, not mocked:
 
-- **4 real PRs driven end-to-end** on a production repo: findings → verified fixes →
-  every thread replied + resolved → re-review → gate green → human merge. One PR took
-  6 adversarial review rounds; all 24 of its P1 findings were triaged against the code
-  (fixed or rebutted with evidence), none blindly accepted.
+- **7 real PRs driven end-to-end** on a production repo: findings → verified fixes →
+  every thread replied + resolved → re-review → gate green → human merge. Two PRs went
+  6 adversarial rounds each (~50 findings total triaged against the code — fixed or
+  rebutted with evidence, none blindly accepted). One of those bought the playbook its
+  shrink-only rule: fix rounds that ADD code hand the next round fresh attack surface.
 - **Gate scenario matrix 6/6** on a throwaway repo: no-reviewers green, silent-reviewer
   red, workflow-only waiver + zero-reviewer guard, on-head Codex detection,
   `workflow_dispatch` re-eval (flipped a stale green after config changed under it),
@@ -202,6 +203,16 @@ code with. Only the fix loop's kickoff depends on your agent:
   by itself when the clean comment lands.
 - Statuses are per-commit: every push resets both legs, and the gate dismisses Claude's
   stale approval from a superseded commit.
+- **launchd loads invalid XML.** A plist with a raw `&&` bootstrapped and ran for hours
+  while `plutil` and `xmllint` both rejected it — parser leniency, not spec. The
+  installer now lints before loading; never trust "it loaded" as "it's valid".
+- **An allowlisted script inside a writable checkout is a self-rewritable approved
+  command** — the headless agent has `Write`, so it could replace the script's content
+  and invoke it via the approved path. That's why notifications use a marker FILE the
+  launcher delivers via a pre-run read-only snapshot; the agent controls text, never code.
+- **macOS cron cannot reach the login Keychain** where `gh`/`claude` keep credentials —
+  every cron sweep died with HTTP 401 while the same command worked in a terminal.
+  `--install-cron` uses a LaunchAgent on macOS for exactly this reason.
 
 ## Files
 
