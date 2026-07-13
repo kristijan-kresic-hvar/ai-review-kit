@@ -121,10 +121,16 @@ Then the manual steps the script prints:
    **block direct pushes to the default branch** in the same ruleset — that server-side
    rule, not the babysitter's deny list (string patterns, defense-in-depth only), is
    the real never-push-to-default boundary.
-   **Multi-author honesty:** like any `pull_request` workflow, the gate runs the
-   workflow code from the PR's merge commit — a same-repo PR can edit `merge-gate.yml`
-   and stamp its own green. Solo, that attacker is you; with collaborators, protect
-   `.github/workflows/` (ruleset path restriction or CODEOWNERS + required review).
+   **Multi-author honesty:** like any `pull_request` workflow, GitHub runs the gate
+   from the PR branch's OWN copy of `merge-gate.yml` — so a same-repo PR can edit the
+   gate and stamp its own green, and CODEOWNERS (which gates *merging*, not workflow
+   *execution*) does not stop that. This is inherent to the `pull_request` trigger and
+   the kit does not claim to close it. Solo, the "attacker" is whoever clicks merge —
+   a non-issue. On a shared repo, treat `merge-gate` as a correctness aid, not a
+   security boundary against a malicious collaborator: the real controls are branch
+   protection requiring human review + not merging on red. A repo needing a
+   tamper-proof gate wants a required check that runs from trusted (default-branch)
+   code — outside this kit's scope.
 5. **Babysitter (per developer, once) — cron is the recommended path:**
    ```bash
    cd <your-repo> && path/to/ai-review-kit/babysit.sh --install-cron   # idempotent
@@ -176,7 +182,17 @@ Full bootstrap on a fresh box:
    Secrets (`CLAUDE_CODE_OAUTH_TOKEN`, `LINEAR_API_KEY`) live in the GitHub repo —
    nothing secret is stored on the machine beyond your own CLI logins.
 3. **Clone the kit** and run `setup.sh` in each target repo (idempotent — re-running
-   on an already-installed repo is safe and refreshes the scripts).
+   on an already-installed repo is safe and refreshes the copied files).
+
+   > **Keeping installed repos in sync.** `merge-gate.yml` and `code-review.yml` are
+   > GitHub **Actions workflows** — GitHub only runs a workflow that physically lives
+   > in the repo's own `.github/workflows/`, so unlike `babysit.sh` (which runs from
+   > the kit clone) they MUST be vendored copies. The canonical source is this kit's
+   > `workflows/`; each installed repo holds a copy that goes stale when the kit
+   > updates. **When the kit's workflows change, re-run `setup.sh` in every installed
+   > repo to re-copy them** — don't hand-edit a repo's copy (that fork drifts and
+   > re-introduces bugs already fixed upstream). `git diff --stat` after a re-run shows
+   > what changed.
 4. **Schedule the babysitter** — from the repo root, invoking YOUR KIT CLONE
    (the scripts are deliberately not vendored into repos — one executable home,
    no drifting copies): `path/to/ai-review-kit/babysit.sh --install-cron`
@@ -244,10 +260,20 @@ code with. Only the fix loop's kickoff depends on your agent:
 - **macOS cron cannot reach the login Keychain** where `gh`/`claude` keep credentials —
   every cron sweep died with HTTP 401 while the same command worked in a terminal.
   `--install-cron` uses a LaunchAgent on macOS for exactly this reason.
-- **Don't merge in the minutes right after retargeting a PR.** The gate invalidates
-  pre-retarget artifacts by timestamp, but a review RUN that started before the
-  retarget can post just after it and read as current until the fresh re-review lands
-  (review objects carry no base identity, so this can't be closed artifact-side).
+- **The gate evaluates on the PR HEAD commit, not the test-merge commit.** Two things
+  follow. (1) Right after you retarget a PR, a review run that started pre-retarget can
+  post within the cancellation grace and read as current until the fresh re-review
+  lands — don't merge in those minutes (review objects carry no base identity, so this
+  can't be closed artifact-side). (2) If the BASE branch advances while a PR sits
+  approved, the effective merge changes without moving the head — the gate won't
+  re-fire on its own — and no passive event re-reviews it (a comment or review only
+  re-runs the gate, which re-greens the same reviews on the same head). Push an empty
+  commit to force a fresh review before merging a long-open PR whose base has moved.
+  A fully base-aware gate would evaluate on `refs/pull/N/merge` — a larger rework,
+  outside this version.
+- **Two open PRs sharing one head commit** (same branch, different bases) can't be
+  told apart by the shared commit status — the gate detects the collision and forces
+  both red; merge via the web UI after checking each PR's own reviews.
 - **Title/body edits don't re-trigger review** (only base retargets do) — deliberate:
   the description is context, and the reviewers are told the diff is the truth when
   they conflict. Rewriting the description after approval changes prose, not the
