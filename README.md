@@ -64,9 +64,19 @@ into one push to keep it there).
 | Neither | Always ("gate not applicable") |
 
 Detection is automatic, per repo, at gate runtime: Claude leg =
-`.github/workflows/code-review.yml` exists (or claude[bot] already reviewed the PR);
-Codex leg = `AGENTS.md` contains a `## Code Review Rules` section (or the Codex bot
+`.github/workflows/code-review.yml` exists on the PR's base branch or head (or
+claude[bot] already reviewed the PR); Codex leg = `AGENTS.md` contains a
+`## Code Review Rules` section on the base branch or head (or the Codex bot
 already touched the PR). Bare AGENTS.md presence is deliberately NOT the signal.
+
+Two blockers apply to every green, whatever the legs: review artifacts must postdate
+the PR's last base retarget (retargeting keeps the head SHA while the effective diff
+changes), and an unresolved thread carrying an `escalated to human` reply keeps the
+gate red until the human answers.
+
+**Fork PRs are unsupported for auto-review:** the review action can't read the token
+secret on forks, so the gate goes red with a fork note — maintainer reviews manually
+and merges via the web UI.
 
 ## Setup
 
@@ -93,22 +103,34 @@ Then the manual steps the script prints:
    scenarios — catching "missed AC #3" and scope creep, not just code smells.
    Self-gating: no secret or no issue id → silent no-op; a Linear outage degrades to a
    normal review rather than failing CI.
+   **Multi-author repos:** the ticket id is author-controlled and the key fetches any
+   ticket it can see — set the repo variable `LINEAR_TEAM_KEYS` (space-separated team
+   prefixes, e.g. `"KKD OPS"`) to fence which tickets a PR can pull into review
+   output, and prefer a least-privilege key over a personal one.
 3. **Codex:** install the Codex GitHub app, enable code review for the repo
    (ChatGPT → Settings → Codex → Code review). **Keep Auto review OFF** — trigger-only
    is one deterministic review per head; the loop posts `@codex review` for you.
 4. **Gate (recommended):** require status check **`merge-gate`** on the default branch
    (Settings → Rulesets; private repos need Pro/Team, public free). Without it the
-   status is visual — don't merge on red.
+   status is visual — don't merge on red. In the ruleset, pin the required check's
+   **source to the GitHub Actions app**: a commit status is writable by any integration
+   with statuses permission, and an unpinned context could be spoofed green by another
+   app. Enable "require conversation resolution" too if the plan offers it.
 5. **Babysitter (per developer, once) — cron is the recommended path:**
    ```bash
    cd <your-repo> && path/to/ai-review-kit/babysit.sh --install-cron   # idempotent
    ```
    That schedules a sweep every 30 min, running from your kit clone (scripts are
    deliberately not vendored into repos — one executable home, no drifting copies). Prompt-free by construction (permissions
-   decided at launch: explicit allowlist + hard deny-layer), agent-agnostic via
+   decided at launch: explicit allowlist + hard deny-layer, including this repo's
+   actual default branch in the push denies), agent-agnostic via
    `AI_CLI`, single-flight locked, and desktop notifications via the bundled
    `ai-review-notify.sh` helper. Default sweep scope: PRs you authored; `--all`
-   covers every open PR in the repo.
+   covers every open PR in the repo. Sweeps run only from a CLEAN checkout of the
+   DEFAULT branch (dirty trees and feature-branch checkouts are refused — the
+   policy/settings the agent loads come from the working tree); the sweep checks out
+   PR branches in that guarded checkout and restores the default branch when done
+   (interactive sessions use disposable worktrees instead).
    (Do NOT use a Claude Code scheduled task for this — it runs under interactive
    permission settings, prompts on anything not pre-allowed, and doesn't take the
    script's lock.)
@@ -158,7 +180,7 @@ Full bootstrap on a fresh box:
    - **Linux → crontab** (credentials are file-based; cron is fine).
    - **Windows:** run the whole flow under **WSL** (then it's the Linux path), or
      native Task Scheduler:
-     `schtasks /Create /SC MINUTE /MO 30 /TN ai-review-babysit /TR "bash -lc 'cd /path/to/repo && .claude/ai-review-babysit.sh >> ~/.ai-review-kit-babysit.log 2>&1'"`
+     `schtasks /Create /SC MINUTE /MO 30 /TN ai-review-babysit /TR "bash -lc 'cd /path/to/repo && /path/to/ai-review-kit/babysit.sh >> ~/.ai-review-kit-babysit.log 2>&1'"`
    - Schedulers only fire while the machine is awake; missed ticks are harmless —
      the sweep is stateless and the next tick reconciles from GitHub. Desktop
      notifications degrade per OS: macOS `osascript` → Linux `notify-send` → log line.
