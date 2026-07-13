@@ -1,6 +1,12 @@
 # ai-review-kit
 
 > **GitHub only.** Everything runs on GitHub Actions + GitHub apps.
+>
+> **Built for one supervised solo operator, not a team.** Everything here was designed,
+> tested, and audited for a single developer driving their own repos with a human at the
+> merge click. Multi-collaborator flows are *partially* handled and honestly flagged, not
+> proven — see [Known limits for teams](#known-limits-for-teams) before relying on it with
+> collaborators.
 
 Two independent AI reviewers on every pull request, an autonomous fix loop that drives
 their findings to convergence, and a merge-gate status that only goes green when every
@@ -45,6 +51,35 @@ Everything here ran live before being called done — not simulated, not mocked:
 Scope honesty: tested by ONE person on solo repos. Multi-collaborator flows (fork PRs,
 concurrent authors) are designed for but not exercised. The loop's fix rounds are
 capped at 3 per PR; reviewers bill your Claude/ChatGPT subscriptions per round.
+
+## Known limits for teams
+
+Solo, none of these bite (the "attacker" and every author is you). On a shared repo they
+are the edges to know before trusting the gate as merge authority — surfaced by three
+adversarial audit rounds (2026-07), documented rather than closed:
+
+- **The merge-gate is a correctness aid, not a security boundary against a malicious
+  collaborator.** Like any `pull_request` workflow, GitHub runs `merge-gate.yml` from the
+  PR branch's own copy — a same-repo PR can edit the gate and stamp its own green, and
+  CODEOWNERS gates *merging*, not workflow *execution*. A tamper-proof gate needs a
+  required check running from trusted (default-branch) code, outside this kit. Protect
+  `.github/workflows/` (ruleset path restriction) and require human review on shared repos.
+- **Fork PRs are unsupported for auto-review** — the review action can't read the token
+  secret on forks; the gate goes red with a fork note. Maintainer reviews and merges via
+  the web UI.
+- **The unattended babysitter assumes one operator on one host** — its single-flight lock
+  is same-machine (PID liveness), and a directive from a `MEMBER`/`COLLABORATOR` is only
+  obeyed after an explicit write-permission check. It is not a shared CI service.
+- **Merge queues are unsupported**, and the gate evaluates on the PR HEAD commit, not the
+  test-merge commit — a base branch advancing under an approved PR doesn't re-fire review
+  (push an empty commit before merging a long-open PR whose base moved).
+- **Linear-aware review reads any ticket the shared key can see** — set the repo variable
+  `LINEAR_TEAM_KEYS` and prefer a least-privilege key so a PR author can't pull an
+  unrelated internal ticket into review output.
+
+Its sibling [linear-pipeline-kit](https://github.com/kristijan-kresic-hvar/linear-pipeline-kit)
+carries the same solo-operator posture (its local `merge-gate.mjs` hook is this kit's
+`merge-gate.yml` twin — kept at verdict parity).
 
 ## Prerequisites
 
