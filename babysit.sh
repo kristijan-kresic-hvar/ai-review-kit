@@ -17,10 +17,14 @@
 # target repo's root. (Don't ALSO run a Claude Code scheduled task for sweeping —
 # it prompts under interactive permissions and doesn't take this script's lock.)
 #
-# Needs: `claude` CLI + `gh` CLI authenticated as you. Must run from the repo root,
-# on a CLEAN checkout of the DEFAULT branch — the sweep refuses dirty trees and
-# feature-branch checkouts (the policy/settings it loads come from the working
-# tree). By default it handles PRs YOU authored;
+# Needs: `claude` CLI + `gh` CLI authenticated as you. Must run from the repo root —
+# but the sweep itself executes inside a DISPOSABLE WORKTREE checked out from
+# origin's default branch, so your checkout (whatever branch, however dirty) is never
+# read, modified, or branch-switched by the agent, and the policy/settings the agent
+# loads are origin's, not your local state's. All runtime state (lock, notify marker,
+# worktree) lives OUTSIDE the checkout under ~/.cache/ai-review-kit/ — runtime files
+# inside the repo would dirty `git status` and taint the agent's view of the tree.
+# By default it handles PRs YOU authored;
 # pass --all to babysit every open PR in the repo (e.g. one maintainer covering a team).
 #
 # Headless fix ceiling (deliberate): the allowlist carries no project build/test
@@ -36,7 +40,10 @@
 # way; the merge-gate status stays the human's merge signal.
 set -euo pipefail
 # cron ships a bare PATH (/usr/bin:/bin) — claude/gh/jq live in homebrew paths.
-export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
+# APPENDED, not prepended: the caller's PATH wins on conflicts (a bare cron PATH has
+# no gh/claude at all, so append covers it; prepending would shadow a caller's
+# deliberate overrides — e.g. the smoke test's stubbed gh/agent).
+export PATH="$PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin"
 # Unknown flags fail hard BEFORE anything runs: a typo'd `--instal-cron` must not
 # fall through and start a real write-capable sweep. The same loop detects
 # --install-cron at ANY position — a positional-only check let
@@ -51,15 +58,23 @@ for arg in "$@"; do
 done
 [ -f .github/ai-review-loop.md ] || { echo "run from a repo with ai-review-kit installed"; exit 1; }
 
+# Per-repo runtime dir OUTSIDE the checkout (keyed by checkout path, like the
+# LaunchAgent label). Runtime state inside the repo was a live P0: the lock's owner
+# file made `git status` dirty, and every sweep refused itself on its own lock.
+# pwd -P: the key must be the PHYSICAL path — symlink/case//tmp-alias spellings of the
+# same checkout would otherwise get separate locks and sweep the same PRs concurrently.
+RUNDIR="${XDG_CACHE_HOME:-$HOME/.cache}/ai-review-kit/$(printf %s "$(pwd -P)" | cksum | cut -d' ' -f1)"
+mkdir -p "$RUNDIR"
+
 # Desktop notifications — marker-file protocol, NO executable entry point for the
-# agent: an allowlisted script inside the writable checkout would be a self-rewritable
+# agent: an allowlisted script inside a writable tree would be a self-rewritable
 # approved command (the agent has Write). Instead the agent writes its message to a
 # marker file, and THIS launcher delivers it after the run — via a read-only snapshot
 # of the helper taken BEFORE the agent ran, so mid-run tampering never executes.
 NOTIFY="$(cd "$(dirname "$0")" && pwd)/ai-review-notify.sh"
 [ -x "$NOTIFY" ] || NOTIFY=""
 NOTIFY_SNAP=""
-NOTIFY_MARKER=".claude/.babysit-notify"
+NOTIFY_MARKER="$RUNDIR/notify"
 
 # --install-cron: schedule THIS repo's sweep every 30 min, idempotently.
 #   macOS  → LaunchAgent, NOT crontab: gh and claude store credentials in the login
@@ -88,7 +103,7 @@ if [ -n "$INSTALL_CRON" ]; then
   if [ "$(uname)" = "Darwin" ]; then
     # Label = basename + short path hash: two checkouts named alike (~/work/x and
     # ~/scratch/x) must not share a plist path and silently unload each other.
-    PATH_HASH=$(printf %s "$(pwd)" | cksum | cut -d' ' -f1)
+    PATH_HASH=$(printf %s "$(pwd -P)" | cksum | cut -d' ' -f1)
     LABEL="com.ai-review-kit.babysit.$(basename "$(pwd)").$PATH_HASH"
     PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
     mkdir -p "$HOME/Library/LaunchAgents"
@@ -161,7 +176,7 @@ fi
 # a run past it is crashed or hung, not working. NOTE: the agent launches below run
 # WITHOUT exec — exec would replace the shell and skip the EXIT trap, leaving the lock
 # held after every successful sweep (caught in live review).
-LOCK=".claude/.babysit.lock"
+LOCK="$RUNDIR/lock"
 if ! mkdir "$LOCK" 2>/dev/null; then
   if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +120 2>/dev/null)" ]; then
     echo "stealing stale lock (>2h old)"; rm -rf "$LOCK" 2>/dev/null || true
@@ -174,32 +189,38 @@ fi
 # sweep outliving the 2h stale-steal would, on eventually exiting, delete the stealing
 # run's lock — letting a third sweep overlap the second on the same PRs.
 echo "$$" > "$LOCK/owner"
-trap '[ "$(cat "$LOCK/owner" 2>/dev/null)" = "$$" ] && rm -rf "$LOCK" 2>/dev/null; [ -n "$NOTIFY_SNAP" ] && rm -rf "$(dirname "$NOTIFY_SNAP")" 2>/dev/null; true' EXIT
+trap '[ "$(cat "$LOCK/owner" 2>/dev/null)" = "$$" ] && { [ -n "${WT:-}" ] && { git worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"; git worktree prune 2>/dev/null; }; rm -rf "$LOCK" 2>/dev/null; }; [ -n "$NOTIFY_SNAP" ] && rm -rf "$(dirname "$NOTIFY_SNAP")" 2>/dev/null; true' EXIT
 
 # Stale-marker cleanup INSIDE the lock — done pre-lock, a second launch would wipe the
 # still-running first sweep's queued notifications before bouncing off the lock.
 rm -f "$NOTIFY_MARKER"
 
-# Unattended agents never run over uncommitted human work: a write-capable sweep in a
-# dirty checkout can sweep local changes into PR-branch commits. Fail quiet, fail closed.
-# The explicit assignment matters: a FAILED `git status` yields an empty substitution,
-# which the bare [ -n ... ] test read as "clean" — couldn't-check must never mean clean.
-DIRTY=$(git status --porcelain) || { echo "git status failed — refusing unattended sweep"; exit 1; }
-if [ -n "$DIRTY" ]; then
-  echo "working tree dirty — refusing unattended sweep (commit/stash first)"; exit 0
-fi
-
-# Pin the sweep to the DEFAULT branch: the policy the agent loads (.github/
-# ai-review-loop.md, .claude/ settings) comes from THIS working tree — a checkout left
-# on a feature branch would feed the unattended run branch-authored policy. The gh call
-# also resolves the repo slug + default branch for the prompt and the push deny below.
+# Resolve the repo slug (prompt scope) + default branch (worktree source, push deny).
 REPO_INFO=$(gh repo view --json nameWithOwner,defaultBranchRef --jq '.nameWithOwner + " " + .defaultBranchRef.name')
 REPO_SLUG=${REPO_INFO%% *}
 DEFAULT_BRANCH=${REPO_INFO##* }
-CUR_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-if [ "$CUR_BRANCH" != "$DEFAULT_BRANCH" ]; then
-  echo "checkout is on '$CUR_BRANCH', not default branch '$DEFAULT_BRANCH' — refusing unattended sweep"; exit 0
+
+# The sweep runs in a DISPOSABLE WORKTREE detached at origin's default branch — never
+# in the human's checkout. This closes three holes at once: a human editing mid-run
+# can't have work swept into PR commits (the old point-in-time dirty check couldn't),
+# the agent's PR-branch checkouts can't leave the human's tree on the wrong branch,
+# and the policy/settings the agent loads are origin's default-branch versions, not
+# whatever the local checkout happens to hold. --detach because the default branch is
+# usually checked out in the main tree (git refuses a second checkout of it), and the
+# agent needs files + git ops, not a branch ref. Fail closed: no fetch, no sweep.
+git fetch origin "$DEFAULT_BRANCH" || { echo "git fetch origin $DEFAULT_BRANCH failed — refusing unattended sweep"; exit 1; }
+# The agent's tree is origin's, so the install gate must be too: a local-only install
+# (line 59's cheap wrong-directory guard) with an unmerged install PR would hand the
+# agent a worktree with NO playbook — an unpiloted write-capable sweep. Fail closed.
+git cat-file -e "origin/$DEFAULT_BRANCH:.github/ai-review-loop.md" 2>/dev/null \
+  || { echo "ai-review-kit not on origin/$DEFAULT_BRANCH (install PR unmerged?) — refusing unattended sweep"; exit 1; }
+git worktree prune 2>/dev/null || true
+WT="$RUNDIR/tree"
+if [ -e "$WT" ]; then
+  git worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"
+  git worktree prune 2>/dev/null || true
 fi
+git worktree add --detach "$WT" "origin/$DEFAULT_BRANCH" >/dev/null
 
 # Snapshot the notify helper only now — every early-exit above leaks nothing, and the
 # EXIT trap (armed with the lock) owns the cleanup from here on.
@@ -216,7 +237,7 @@ for arg in "$@"; do [ "$arg" = "--all" ] && SCOPE="by ANY author"; done
 # cron must not act on other repos (their own crons/sessions own them). Observed live:
 # without the explicit slug, a sweep crossed repos. (REPO_SLUG resolved above,
 # alongside the default-branch pin.)
-PROMPT="Read .github/ai-review-loop.md fully and run its sweep mode restricted STRICTLY to the repository ${REPO_SLUG} — filter the enumerate to that repo, and ignore PRs in any other repository. Repo-scope every command: -R ${REPO_SLUG} on gh pr/gh search commands, fully-qualified repos/${REPO_SLUG}/... paths on gh api calls (gh api has no -R flag). Scope: OPEN, non-draft pull requests ${SCOPE} — never touch merged, closed, or draft PRs. Nothing actionable = exit with one quiet line."
+PROMPT="Read .github/ai-review-loop.md fully and run its sweep mode restricted STRICTLY to the repository ${REPO_SLUG} — filter the enumerate to that repo, and ignore PRs in any other repository. Repo-scope every command: -R ${REPO_SLUG} on gh pr/gh search commands, fully-qualified repos/${REPO_SLUG}/... paths on gh api calls (gh api has no -R flag). Scope: OPEN, non-draft pull requests ${SCOPE} — never touch merged, closed, or draft PRs. Your working directory is a disposable worktree owned by this sweep — work on PR branches and commit fixes right here, using EXACTLY the checkout recipe in the playbook's worktree rule (this is the babysitter context it describes). Nothing actionable = exit with one quiet line."
 if [ -n "$NOTIFY_SNAP" ]; then
   PROMPT="$PROMPT Where the playbook says to notify the human (converged PR, critical escalation, dead reviewer leg, security-fix FYI), APPEND one line per event to the file $NOTIFY_MARKER (Write tool) — the launcher delivers desktop notifications from it after the sweep; that is your only notification channel."
 fi
@@ -237,18 +258,28 @@ case "$AI_CLI" in
     # createCommitOnBranch, create/update/deleteRef). Residual accepted risk:
     # plain POST endpoints (create comment/issue/ref-via-REST) — spammy at worst,
     # no history rewrite or default-branch move without a method flag. git push
-    # denies cover bare pushes (branch inferred from a default-branch checkout)
+    # denies cover bare pushes (the worktree starts detached, so a bare push is
+    # an error or an implicit surprise — refspecs stay explicit), force pushes
+    # (a confused agent's non-FF "recovery" must never rewrite remote history),
     # and ANY refspec containing main/master OR this repo's actual default branch
     # (`origin HEAD:trunk` on a trunk-default repo slipped every static pattern);
     # branch names containing those words over-block — fail-closed, rename.
-    # NOTE: allow/deny rules MERGE with any .claude/settings.json in the checkout
-    # (allows are additive across sources; deny still always wins) — one more
-    # reason the sweep only runs from a default-branch checkout (enforced above):
-    # settings are the default branch's, not a PR branch's.
+    # NOTE: allow/deny rules MERGE with any .claude/settings.json in the working
+    # directory (allows are additive across sources; deny still always wins). At
+    # LAUNCH those settings are origin's default-branch versions (fresh detached
+    # worktree) — never a stale local checkout's. A mid-sweep PR-branch checkout
+    # swaps the FILE to that branch's version, but Claude Code reads settings at
+    # session start, so the running session's rules don't change; the residual is
+    # the next tick's launch, which re-creates the worktree from origin first.
+    # HONESTY: this deny layer is defense-in-depth against a CONFUSED agent, not a
+    # security boundary against an adversarial one — string patterns can be dodged
+    # by quoting/expansion tricks. The real default-branch boundary is server-side:
+    # a Ruleset that blocks direct pushes (README § Setup step 4).
     ALLOWED="Skill,Read,Glob,Grep,Edit,Write,Bash(jq:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr checks:*),Bash(gh api:*),Bash(gh search:*),Bash(gh workflow run:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git worktree:*),Bash(git checkout:*),Bash(git fetch:*)"
-    claude -p "$PROMPT" \
+    ( cd "$WT" && claude -p "$PROMPT" \
       --allowedTools "$ALLOWED" \
-      --disallowedTools "Bash(gh pr merge:*),Bash(gh api* -X *),Bash(gh api*--method*),Bash(gh api*/merge*),Bash(gh api*merges*),Bash(gh api*mergePullRequest*),Bash(gh api*createCommitOnBranch*),Bash(gh api*updateRef*),Bash(gh api*deleteRef*),Bash(gh api*createRef*),Bash(gh api*/git/*),Bash(git push),Bash(git push origin),Bash(git push origin HEAD),Bash(git push -u origin HEAD),Bash(git push*HEAD),Bash(git push*main*),Bash(git push*master*),Bash(git push*${DEFAULT_BRANCH}*)" || echo "[babysit] claude exited non-zero" ;;
+      --disallowedTools "Bash(gh pr merge:*),Bash(gh api* -X *),Bash(gh api*--method*),Bash(gh api*/merge*),Bash(gh api*merges*),Bash(gh api*mergePullRequest*),Bash(gh api*createCommitOnBranch*),Bash(gh api*updateRef*),Bash(gh api*deleteRef*),Bash(gh api*createRef*),Bash(gh api*/git/*),Bash(git push),Bash(git push origin),Bash(git push origin HEAD),Bash(git push -u origin HEAD),Bash(git push*HEAD),Bash(git push*--force*),Bash(git push*-f *),Bash(git push*main*),Bash(git push*master*),Bash(git push*${DEFAULT_BRANCH}*)" ) \
+      || { echo "[babysit] claude exited non-zero"; echo "ai-review-kit: sweep runner FAILED — check ~/.ai-review-kit-babysit.log" >> "$NOTIFY_MARKER"; } ;;
   codex)
     # --full-auto: workspace-write + on-request network. Smoke-tested 2026-07-13: an
     # idle sweep works OUT OF THE BOX — the sandbox blocks gh's network, and Codex
@@ -259,18 +290,29 @@ case "$AI_CLI" in
     # is no deny-list equivalent here — the playbook's never-merge/never-main rules are
     # prompt-level only, enforced by Codex's own sandbox/approval config, not by this
     # script. Verify one FIX round interactively before trusting it to cron.
-    codex exec --full-auto "$PROMPT" || echo "[babysit] codex exited non-zero" ;;
+    ( cd "$WT" && codex exec --full-auto "$PROMPT" ) \
+      || { echo "[babysit] codex exited non-zero"; echo "ai-review-kit: sweep runner FAILED — check ~/.ai-review-kit-babysit.log" >> "$NOTIFY_MARKER"; } ;;
   *)
     # Executed verbatim with the prompt appended: unsupported, no guardrails, no promises.
-    $AI_CLI "$PROMPT" || echo "[babysit] $AI_CLI exited non-zero" ;;
+    ( cd "$WT" && $AI_CLI "$PROMPT" ) \
+      || { echo "[babysit] $AI_CLI exited non-zero"; echo "ai-review-kit: sweep runner FAILED — check ~/.ai-review-kit-babysit.log" >> "$NOTIFY_MARKER"; } ;;
 esac
 
 # Deliver queued notifications from the marker file — via the pre-run read-only
-# snapshot, never the (agent-writable) checkout copy. Max 3, each line truncated;
-# the agent controls only the TEXT (argv-passed, injection-safe), never code.
+# snapshot, never an agent-writable copy. First 3 delivered (each line truncated),
+# overflow collapses into ONE "+N more" notification so a 4th event (say, a critical
+# escalation in a team-sized sweep) is surfaced rather than silently dropped; the
+# full marker is echoed into the log either way. The agent controls only the TEXT
+# (argv-passed, injection-safe), never code.
 if [ -n "$NOTIFY_SNAP" ] && [ -f "$NOTIFY_MARKER" ]; then
-  head -3 "$NOTIFY_MARKER" | cut -c1-200 | while IFS= read -r line; do
-    [ -n "$line" ] && "$NOTIFY_SNAP" "$line"
+  echo "[babysit] notifications queued by this sweep:"; cat "$NOTIFY_MARKER"
+  # grep . BEFORE head so count and delivery see the same blank-free stream — a
+  # trailing blank line once made the loop's last test fail and set -e killed the
+  # script between delivery and cleanup (marker redelivered forever).
+  TOTAL=$(grep -c . "$NOTIFY_MARKER" || true)
+  { grep . "$NOTIFY_MARKER" || true; } | head -3 | cut -c1-200 | while IFS= read -r line; do
+    "$NOTIFY_SNAP" "$line" || true
   done
+  [ "$TOTAL" -gt 3 ] && "$NOTIFY_SNAP" "ai-review-kit: +$((TOTAL - 3)) more events — see ~/.ai-review-kit-babysit.log"
   rm -f "$NOTIFY_MARKER"
 fi

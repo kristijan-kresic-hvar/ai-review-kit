@@ -32,9 +32,11 @@ Everything here ran live before being called done — not simulated, not mocked:
   red, workflow-only waiver + zero-reviewer guard, on-head Codex detection,
   `workflow_dispatch` re-eval (flipped a stale green after config changed under it),
   `issue_comment` re-eval.
-- **14/14 local tests**: every `setup.sh` variant (legs, idempotent re-run,
-  preserve-existing), every Linear-step degradation path (no key / no id / API failure
-  / timeout / issue-not-found), and a delimiter-injection attempt contained.
+- **Committed smoke test** (`test/smoke.sh`, no framework, no network): drives a real
+  babysitter sweep with stubbed `gh`/agent in a throwaway repo — worktree isolation,
+  checkout-stays-clean, single-flight lock, arg validation. Run it before trusting a
+  kit change. (Dev-time-only checks that shipped earlier versions — setup variants,
+  Linear degradation paths, injection attempts — were run by hand, not committed.)
 - **2 unattended headless sweeps** observed live, including the permission denies
   stopping a merge-by-API attempt and the single-flight lock rejecting a second run.
 - **Ticket-aware review proven**: reviewer verdict explicitly checked the linked
@@ -58,8 +60,8 @@ into one push to keep it there).
 
 | Repo has | merge-gate goes green when |
 |---|---|
-| Claude + Codex | Claude APPROVED on head **and** Codex clean (no unresolved threads + a "didn't find any major issues" comment naming the head) |
-| Claude only | Claude APPROVED on head |
+| Claude + Codex | Claude clean (APPROVED on head + no unresolved Claude threads) **and** Codex clean (no unresolved Codex threads + a current "didn't find any major issues" comment naming the head) |
+| Claude only | Claude APPROVED on head + no unresolved Claude-rooted threads |
 | Codex only | Codex clean on head |
 | Neither | Always ("gate not applicable") |
 
@@ -115,7 +117,14 @@ Then the manual steps the script prints:
    status is visual — don't merge on red. In the ruleset, pin the required check's
    **source to the GitHub Actions app**: a commit status is writable by any integration
    with statuses permission, and an unpinned context could be spoofed green by another
-   app. Enable "require conversation resolution" too if the plan offers it.
+   app. Enable "require conversation resolution" too if the plan offers it. Also
+   **block direct pushes to the default branch** in the same ruleset — that server-side
+   rule, not the babysitter's deny list (string patterns, defense-in-depth only), is
+   the real never-push-to-default boundary.
+   **Multi-author honesty:** like any `pull_request` workflow, the gate runs the
+   workflow code from the PR's merge commit — a same-repo PR can edit `merge-gate.yml`
+   and stamp its own green. Solo, that attacker is you; with collaborators, protect
+   `.github/workflows/` (ruleset path restriction or CODEOWNERS + required review).
 5. **Babysitter (per developer, once) — cron is the recommended path:**
    ```bash
    cd <your-repo> && path/to/ai-review-kit/babysit.sh --install-cron   # idempotent
@@ -126,11 +135,11 @@ Then the manual steps the script prints:
    actual default branch in the push denies), agent-agnostic via
    `AI_CLI`, single-flight locked, and desktop notifications via the bundled
    `ai-review-notify.sh` helper. Default sweep scope: PRs you authored; `--all`
-   covers every open PR in the repo. Sweeps run only from a CLEAN checkout of the
-   DEFAULT branch (dirty trees and feature-branch checkouts are refused — the
-   policy/settings the agent loads come from the working tree); the sweep checks out
-   PR branches in that guarded checkout and restores the default branch when done
-   (interactive sessions use disposable worktrees instead).
+   covers every open PR in the repo. The sweep never touches your checkout: it runs
+   the agent inside a disposable worktree checked out from origin's default branch
+   (policy/settings come from origin, not local state), and all runtime state (lock,
+   notify marker, worktree) lives under `~/.cache/ai-review-kit/` — your tree can be
+   dirty, mid-rebase, or on any branch; the sweep neither reads nor blocks on it.
    (Do NOT use a Claude Code scheduled task for this — it runs under interactive
    permission settings, prompts on anything not pre-allowed, and doesn't take the
    script's lock.)
@@ -235,6 +244,14 @@ code with. Only the fix loop's kickoff depends on your agent:
 - **macOS cron cannot reach the login Keychain** where `gh`/`claude` keep credentials —
   every cron sweep died with HTTP 401 while the same command worked in a terminal.
   `--install-cron` uses a LaunchAgent on macOS for exactly this reason.
+- **Don't merge in the minutes right after retargeting a PR.** The gate invalidates
+  pre-retarget artifacts by timestamp, but a review RUN that started before the
+  retarget can post just after it and read as current until the fresh re-review lands
+  (review objects carry no base identity, so this can't be closed artifact-side).
+- **Title/body edits don't re-trigger review** (only base retargets do) — deliberate:
+  the description is context, and the reviewers are told the diff is the truth when
+  they conflict. Rewriting the description after approval changes prose, not the
+  reviewed code.
 
 ## Files
 
@@ -249,6 +266,7 @@ code with. Only the fix loop's kickoff depends on your agent:
 | `pull_request_template.md` | Review-optimized PR structure (Summary / Scope / Trade-offs / Verification) |
 | `CLAUDE.md.section` | Appended to the repo's CLAUDE.md — auto-runs the loop after Claude-opened PRs |
 | `setup.sh` | One-shot installer + auth checklist |
+| `test/smoke.sh` | Stubbed end-to-end babysitter smoke test (isolation, lock, arg handling) |
 
 ## License
 
