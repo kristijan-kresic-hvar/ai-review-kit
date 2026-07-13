@@ -56,10 +56,19 @@ NOTIFY_MARKER=".claude/.babysit-notify"
 #            README § Portability: https://github.com/kristijan-kresic-hvar/ai-review-kit
 # The job invokes this script by its resolved absolute path, so it works for the
 # repo-installed copy and a shared kit clone alike.
-if [ "${1:-}" = "--install-cron" ]; then
+if [ "${1:-}" = "--install-cron" ] || [ "${2:-}" = "--install-cron" ]; then
   SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+  # Fail closed on quote-bearing paths: the generated bash -c / cron command single-
+  # quotes both paths, and a path containing ' would break out of the quoting. Rare
+  # enough that refusing beats shipping a shell-escaping library.
+  case "$(pwd)$SELF" in *"'"*) echo "checkout or kit path contains a single quote — unsupported for scheduling; move/rename and retry"; exit 1 ;; esac
+  SCHED_ARGS=""
+  for arg in "$@"; do [ "$arg" = "--all" ] && SCHED_ARGS=" --all"; done
   if [ "$(uname)" = "Darwin" ]; then
-    LABEL="com.ai-review-kit.babysit.$(basename "$(pwd)")"
+    # Label = basename + short path hash: two checkouts named alike (~/work/x and
+    # ~/scratch/x) must not share a plist path and silently unload each other.
+    PATH_HASH=$(printf %s "$(pwd)" | cksum | cut -d' ' -f1)
+    LABEL="com.ai-review-kit.babysit.$(basename "$(pwd)").$PATH_HASH"
     PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
     mkdir -p "$HOME/Library/LaunchAgents"
     cat > "$PLIST" <<PLIST_EOF
@@ -69,7 +78,7 @@ if [ "${1:-}" = "--install-cron" ]; then
   <key>Label</key><string>$LABEL</string>
   <key>ProgramArguments</key><array>
     <string>/bin/bash</string><string>-c</string>
-    <string>cd '$(pwd)' || exit 1; '$SELF'</string>
+    <string>cd '$(pwd)' || exit 1; '$SELF'$SCHED_ARGS</string>
   </array>
   <key>StartInterval</key><integer>1800</integer>
   <key>RunAtLoad</key><true/>
@@ -90,19 +99,21 @@ PLIST_EOF
     # Paths single-quoted: a checkout under 'Client Projects/...' must not token-split
     # or execute as shell syntax inside cron. (Paths containing a single quote remain
     # unsupported — vanishingly rare; the installer is not a shell-escaping library.)
-    LINE="*/30 * * * * cd '$(pwd)' && '$SELF' >> \"\$HOME/.ai-review-kit-babysit.log\" 2>&1"
+    LINE="*/30 * * * * cd '$(pwd)' && '$SELF'$SCHED_ARGS >> \"\$HOME/.ai-review-kit-babysit.log\" 2>&1"
     if ! command -v crontab >/dev/null 2>&1; then
       echo "no crontab on this system — schedule manually: kit README § Portability"; echo "  https://github.com/kristijan-kresic-hvar/ai-review-kit#portability--new-machine-any-os-any-teammate"; exit 1
     fi
     # Idempotency keys on the exact install fragment — script path alone breaks the
     # shared-kit-clone-many-repos case (same $SELF for every repo); checkout path
     # alone false-matches unrelated jobs that cd here. Both together are unambiguous.
-    FRAG="cd '$(pwd)' && '$SELF'"
+    FRAG="cd '$(pwd)' && '$SELF'$SCHED_ARGS"
     if crontab -l 2>/dev/null | grep -qF "$FRAG"; then
       echo "already scheduled — this repo's babysitter crontab entry exists:"
       crontab -l | grep -F "$FRAG"
     else
-      (crontab -l 2>/dev/null; echo "$LINE") | crontab -
+      # `crontab -l` exits non-zero when no crontab exists yet; under set -e that
+      # aborted the subshell BEFORE echo — first-time installs silently did nothing.
+      ( crontab -l 2>/dev/null || true; echo "$LINE" ) | crontab -
       echo "installed: $LINE"
       echo "log: ~/.ai-review-kit-babysit.log · view schedule: crontab -l"
     fi
@@ -148,7 +159,7 @@ if [ -n "$NOTIFY" ]; then
 fi
 
 SCOPE="authored by me (--author @me)"
-[ "${1:-}" = "--all" ] && SCOPE="by ANY author"
+for arg in "$@"; do [ "$arg" = "--all" ] && SCOPE="by ANY author"; done
 
 # Hard repo scope: the playbook's enumerate is account-wide by default; a repo-local
 # cron must not act on other repos (their own crons/sessions own them). Observed live:

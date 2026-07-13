@@ -100,9 +100,10 @@ Then the manual steps the script prints:
    status is visual — don't merge on red.
 5. **Babysitter (per developer, once) — cron is the recommended path:**
    ```bash
-   .claude/ai-review-babysit.sh --install-cron   # from the repo root; idempotent
+   cd <your-repo> && path/to/ai-review-kit/babysit.sh --install-cron   # idempotent
    ```
-   That schedules a sweep every 30 min. Prompt-free by construction (permissions
+   That schedules a sweep every 30 min, running from your kit clone (scripts are
+   deliberately not vendored into repos — one executable home, no drifting copies). Prompt-free by construction (permissions
    decided at launch: explicit allowlist + hard deny-layer), agent-agnostic via
    `AI_CLI`, single-flight locked, and desktop notifications via the bundled
    `ai-review-notify.sh` helper. Default sweep scope: PRs you authored; `--all`
@@ -144,8 +145,10 @@ Full bootstrap on a fresh box:
    nothing secret is stored on the machine beyond your own CLI logins.
 3. **Clone the kit** and run `setup.sh` in each target repo (idempotent — re-running
    on an already-installed repo is safe and refreshes the scripts).
-4. **Schedule the babysitter:** `.claude/ai-review-babysit.sh --install-cron`
-   (idempotent) — it picks the right scheduler per OS:
+4. **Schedule the babysitter** — from the repo root, invoking YOUR KIT CLONE
+   (the scripts are deliberately not vendored into repos — one executable home,
+   no drifting copies): `path/to/ai-review-kit/babysit.sh --install-cron`
+   (idempotent; add `--all` for team scope) — it picks the right scheduler per OS:
    - **macOS → LaunchAgent, deliberately NOT cron:** `gh` and `claude` keep their
      credentials in the login Keychain, which plain cron's session cannot access —
      a cron-scheduled sweep dies with HTTP 401 (observed live). The LaunchAgent runs
@@ -209,7 +212,7 @@ code with. Only the fix loop's kickoff depends on your agent:
 | `AGENTS.md.example` | Codex adversarial briefing with the `## Code Review Rules` contract section |
 | `ai-review-loop.md` | THE canonical fix-loop playbook — installed as `.github/ai-review-loop.md` |
 | `skills/pr-review-loop.md` | Thin Claude Code skill shim → the playbook |
-| `babysit.sh` | Installed as `.claude/ai-review-babysit.sh` — headless sweep runner for cron (`--all` = whole team) |
+| `babysit.sh` | Headless sweep runner — runs from the kit clone, never vendored (`--install-cron` schedules it; `--all` = whole team) |
 | `pull_request_template.md` | Review-optimized PR structure (Summary / Scope / Trade-offs / Verification) |
 | `CLAUDE.md.section` | Appended to the repo's CLAUDE.md — auto-runs the loop after Claude-opened PRs |
 | `setup.sh` | One-shot installer + auth checklist |
