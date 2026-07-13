@@ -9,6 +9,9 @@
 #     major issues") whose embedded 10+ hex-char commit SHA prefixes the head. (A 👍 reaction is a
 #     weak hint only — no GitHub event fires for reactions, so it can never flip the
 #     status by itself; the comment is authoritative.)
+#   - Both legs: artifacts must postdate the PR's last base RETARGET (retargeting keeps
+#     the head SHA while the effective diff changes), and any unresolved thread carrying
+#     an `escalated to human` reply blocks green regardless of which reviewer rooted it.
 # NOTE: on GitHub Free private repos this status is VISUAL — branch protection (which
 # hard-blocks the merge button) needs a paid plan or a public repo. Where available,
 # require the "merge-gate" status check via Rulesets so red actually blocks the button.
@@ -16,13 +19,15 @@ name: merge-gate
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    # edited: a base RETARGET must re-evaluate immediately — it changes the effective
+    # diff without moving the head SHA (the job `if` filters out title/body edits).
+    types: [opened, synchronize, reopened, ready_for_review, edited]
   pull_request_review:
     types: [submitted, dismissed]
   # NOTE: pull_request_review_thread is a WEBHOOK event only — it is NOT a valid
   # workflow trigger; listing it makes GitHub reject the entire file ("workflow file
-  # issue", zero jobs, every event). Thread resolves re-evaluate via the next comment
-  # (issue_comment) or manual workflow_dispatch instead.
+  # issue", zero jobs, every event). Thread resolves (and UN-resolves) re-evaluate via
+  # the next comment (issue_comment) or manual workflow_dispatch instead.
   issue_comment:
     # edited/deleted too: the clean-pass comment is the authoritative positive signal —
     # an edit that breaks the SHA match or a deletion must re-evaluate a stale green.
@@ -56,8 +61,12 @@ permissions:
 
 jobs:
   gate:
-    # issue_comment also fires on plain issues — only run for comments on PRs
-    if: github.event_name != 'issue_comment' || github.event.issue.pull_request
+    # issue_comment also fires on plain issues — only run for comments on PRs.
+    # pull_request 'edited' runs only for base retargets (issue_comment 'edited' —
+    # a comment edit — must still run: the clean comment is the positive signal).
+    if: |
+      (github.event_name != 'issue_comment' || github.event.issue.pull_request)
+      && (github.event_name != 'pull_request' || github.event.action != 'edited' || github.event.changes.base != null)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -102,9 +111,11 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUM: ${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.pr_number }}
           OWNER: ${{ github.repository_owner }}
-          # Payload SHA (present on PR events) is the fallback head if the API fetch fails,
+          # Payload values (present on PR events) are the fallbacks if the API fetch fails,
           # so a network blip still stamps red on the right commit instead of vanishing.
           PAYLOAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PAYLOAD_BASE: ${{ github.event.pull_request.base.ref }}
+          PAYLOAD_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           # Two identities on purpose: REST user.login carries the [bot] suffix; GraphQL
           # author.login observed bare (verified live). The thread filter accepts BOTH
           # forms defensively — a wrong single form would fail OPEN (unresolved count 0).
@@ -116,7 +127,13 @@ jobs:
           # Captured BEFORE any data fetch: the freshness reference for stampOk below.
           RUN_T0=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-          HEAD_SHA=$(gh api "repos/$REPO/pulls/$PR_NUM" --jq .head.sha 2>/dev/null || echo "$PAYLOAD_SHA")
+          # Head SHA + base ref + head repo in one fetch. Base ref feeds the config probes
+          # (a PR into a non-default branch must be judged by ITS base's config, not the
+          # default branch's); head repo identifies fork PRs for an honest red message.
+          PRDATA=$(gh api "repos/$REPO/pulls/$PR_NUM" \
+            --jq '[.head.sha, .base.ref, (.head.repo.full_name // "")] | join(" ")' 2>/dev/null \
+            || echo "$PAYLOAD_SHA $PAYLOAD_BASE $PAYLOAD_HEAD_REPO")
+          read -r HEAD_SHA BASE_REF HEAD_REPO <<<"$PRDATA" || true
           [ -z "$HEAD_SHA" ] && { echo "::error::merge-gate: cannot determine head SHA"; exit 1; }
 
           # Fail-closed: any unhandled error stamps red on the head before the job dies.
@@ -132,8 +149,11 @@ jobs:
           # "couldn't check" must never become "assume clean". Red stamps stay unguarded:
           # stale red is fail-closed and the next event re-greens it.
           stampOk() {
-            NEWEST_FAIL=$(gh api "repos/$REPO/statuses/$HEAD_SHA" \
-              --jq "[.[] | select(.context==\"merge-gate\")][0] | select(.state==\"failure\") | .created_at")
+            # --paginate: statuses accumulate (every gate run stamps 1-2); a busy head can
+            # push the newest merge-gate entry past the first page, where a single-page
+            # read would miss a concurrent failure and green over it.
+            NEWEST_FAIL=$(gh api --paginate --slurp "repos/$REPO/statuses/$HEAD_SHA" \
+              | jq -r '[add[] | select(.context=="merge-gate")][0] | select(.state=="failure") | .created_at // empty')
             if [ -n "$NEWEST_FAIL" ] && ! [ "$NEWEST_FAIL" \< "$RUN_T0" ]; then
               echo "::notice::merge-gate: not stamping success — newer-or-concurrent failure ($NEWEST_FAIL >= run start $RUN_T0)"
               return 0
@@ -145,32 +165,54 @@ jobs:
             # so it's visible here — restore it on top. A failure written after our success
             # supersedes it naturally. Together that closes the stale-green window, not
             # just shrinks it; a failed re-read lands in the ERR trap (red, fail-closed).
-            POST_FAIL=$(gh api "repos/$REPO/statuses/$HEAD_SHA" \
-              --jq "[.[] | select(.context==\"merge-gate\") | select(.state==\"failure\")][0].created_at // empty")
+            POST_FAIL=$(gh api --paginate --slurp "repos/$REPO/statuses/$HEAD_SHA" \
+              | jq -r '[add[] | select(.context=="merge-gate") | select(.state=="failure")][0].created_at // empty')
             if [ -n "$POST_FAIL" ] && ! [ "$POST_FAIL" \< "$RUN_T0" ]; then
               stamp failure "restored: a concurrent run stamped failure ($POST_FAIL) — that verdict stands, not this run's stale success"
               echo "::notice::merge-gate: success superseded — restored concurrent failure from $POST_FAIL"
             fi
           }
 
-          # cfg PATH -> "yes" if the file exists, "" if a genuine 404, FAIL (exit) on any
-          # other error so a transient API hiccup can't be read as "reviewer not configured".
+          # Artifacts must postdate the PR's last base RETARGET: changing the base keeps
+          # the head SHA — and with it every head-named approval and clean comment — while
+          # the effective diff changes. The issue timeline is the stateless record of
+          # retargets. Deliberately NOT error-suppressed: a failed read lands in the ERR
+          # trap (red), because "couldn't check" must never become "assume clean".
+          PROBLEMS=""; NOTE=""; WAIVED=0; UNRESOLVED=0; CLEAN=0; TOTAL_THREADS=0; ESCALATED=0
+          BASE_CUTOFF=$(gh api --paginate --slurp "repos/$REPO/issues/$PR_NUM/timeline" \
+            | jq -r '[add[] | select(.event == "base_ref_changed" or .event == "automatic_base_change_succeeded") | .created_at // empty] | max // ""')
+          [ -n "$BASE_CUTOFF" ] && NOTE="base retargeted $BASE_CUTOFF — older review artifacts ignored. "
+
+          # cfg PATH -> "yes" if the file exists on the PR's BASE ref or HEAD, "" if a
+          # genuine 404 on both, FAIL (exit) on any other error so a transient API hiccup
+          # can't be read as "reviewer not configured". Both ends on purpose (mirrors
+          # codexCfg): head too, or the PR that ADDS the reviewer config merges as
+          # "no reviewers configured" (reproduced live); base too, or a PR that REMOVES
+          # it disables its own gate. Empty BASE_REF (fallback path) probes the default
+          # branch — the pre-retarget behavior, still fail-closed.
+          # Echoes WHICH ref hit ("base" or "head", both truthy for the [ -n ] checks):
+          # "head"-only means the PR is ADDING the config — that distinction picks the
+          # honest red message below (an install PR can't be healed by splitting alone).
           cfg() {
-            local body; body=$(gh api "repos/$REPO/contents/$1" -i 2>/dev/null || true)
-            case "$body" in
-              *"HTTP/2.0 200"*|*"HTTP/1.1 200"*|*" 200 "*) echo yes ;;
-              *"HTTP/2.0 404"*|*"HTTP/1.1 404"*|*" 404 "*) echo "" ;;
-              *) echo "probe failed for $1" >&2; return 1 ;;
-            esac
+            local ref which body
+            for which in base head; do
+              if [ "$which" = base ]; then ref="${BASE_REF:+?ref=$BASE_REF}"; else ref="?ref=$HEAD_SHA"; fi
+              body=$(gh api "repos/$REPO/contents/$1$ref" -i 2>/dev/null || true)
+              case "$body" in
+                *"HTTP/2.0 200"*|*"HTTP/1.1 200"*|*" 200 "*) echo "$which"; return 0 ;;
+                *"HTTP/2.0 404"*|*"HTTP/1.1 404"*|*" 404 "*) : ;;
+                *) echo "probe failed for $1$ref" >&2; return 1 ;;
+              esac
+            done
           }
           CLAUDE_CFG=$(cfg ".github/workflows/code-review.yml")
           # Codex leg is keyed on AGENTS.md CONTAINING the official '## Code Review Rules'
           # section (openai/codex#25738) — NOT bare file presence. Teams use AGENTS.md as
           # a generic agent briefing without the Codex review app installed; file-presence
           # detection would hard-red the gate forever on such repos ("configured but never
-          # touched"). Probed on the default branch AND the PR head (live finding): head
+          # touched"). Probed on the PR's BASE ref AND the PR head (live finding): head
           # too, or the PR that ADDS the section merges without Codex reviewing the
-          # enabling change; default too, or a PR that REMOVES the section disables its
+          # enabling change; base too, or a PR that REMOVES the section disables its
           # own gate. 404 = not configured on that ref; everything else fails closed (ERR
           # trap): a non-base64 response (contents API returns encoding "none" past 1MB —
           # and a raw-jq null content would even base64-decode "successfully" to garbage)
@@ -180,7 +222,7 @@ jobs:
           # exactly the fail-open this function exists to prevent.
           codexCfg() {
             local ref resp enc b64 text
-            for ref in "" "?ref=$HEAD_SHA"; do
+            for ref in "${BASE_REF:+?ref=$BASE_REF}" "?ref=$HEAD_SHA"; do
               if resp=$(gh api "repos/$REPO/contents/AGENTS.md$ref" --jq '"\(.encoding) \(.content)"' 2>&1); then
                 enc=${resp%%[[:space:]]*}
                 b64=${resp#*[[:space:]]}
@@ -209,7 +251,25 @@ jobs:
             $(gh api --paginate "repos/$REPO/issues/$PR_NUM/comments" --jq "[.[] | select(.user.login == \"$CODEX_REST\")] | length" | awk '{s+=$1} END {print s+0}') + \
             $(gh api --paginate "repos/$REPO/issues/$PR_NUM/reactions" --jq "[.[] | select(.user.login == \"$CODEX_REST\")] | length" | awk '{s+=$1} END {print s+0}') ))
 
-          PROBLEMS=""; NOTE=""; UNRESOLVED=0; CLEAN=0; TOTAL_THREADS=0
+          # Threads are shared gate state (not Codex-only): the playbook's escalation
+          # contract says a thread whose reply starts `escalated to human` stays
+          # UNRESOLVED as the machine-visible merge blocker — whichever reviewer rooted
+          # it. Enforce that here; a Codex-rooted filter alone would let a Claude-thread
+          # escalation coexist with a green gate. The marker scan reads the last 100
+          # comments per thread (GraphQL page max) — a marker buried under 100+ later
+          # replies is out of reach, accepted as pathological (same spirit as the
+          # 100-thread cap, which fails closed).
+          if [ "$CLAUDE_ACTIVE" -gt 0 ] || [ "$CODEX_ACTIVE" -gt 0 ]; then
+            THREADS=$(gh api graphql \
+              -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewThreads(first:100){totalCount nodes{isResolved root: comments(first:1){nodes{author{login}}} latest: comments(last:100){nodes{body}}}}}}}' \
+              -F o="$OWNER" -F r="$NAME" -F n="$PR_NUM" \
+              --jq "{total: .data.repository.pullRequest.reviewThreads.totalCount, unresolved: ([.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | select(((.root.nodes[0].author.login) // \"\") | IN(\"$CODEX_GQL\", \"$CODEX_REST\"))] | length), escalated: ([.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | select([.latest.nodes[].body | ascii_downcase | startswith(\"escalated to human\")] | any)] | length)}")
+            TOTAL_THREADS=$(echo "$THREADS" | jq .total)
+            UNRESOLVED=$(echo "$THREADS" | jq .unresolved)
+            ESCALATED=$(echo "$THREADS" | jq .escalated)
+            [ "$TOTAL_THREADS" -gt 100 ] && PROBLEMS="${PROBLEMS}${TOTAL_THREADS} review threads — too many to verify (cap 100). "
+            [ "$ESCALATED" -gt 0 ] && PROBLEMS="${PROBLEMS}${ESCALATED} thread(s) escalated to human await an answer. "
+          fi
 
           if [ -n "$CLAUDE_CFG" ] || [ "$CLAUDE_ACTIVE" -gt 0 ]; then
             # One files call → total, count under .github/workflows/, and whether
@@ -219,16 +279,26 @@ jobs:
               | jq 'add | {t: length, w: ([.[] | select(.filename | startswith(".github/workflows/"))] | length), cr: ([.[] | select(.filename == ".github/workflows/code-review.yml")] | length)}')
             TOTAL_FILES=$(echo "$FSTATS" | jq .t); WF_FILES=$(echo "$FSTATS" | jq .w); TOUCHES_WF=$(echo "$FSTATS" | jq .cr)
             if [ "$TOUCHES_WF" -gt 0 ] && [ "$TOTAL_FILES" = "$WF_FILES" ]; then
-              NOTE="Claude waived (workflow-only self-edit). "
+              NOTE="${NOTE}Claude waived (workflow-only self-edit). "; WAIVED=1
+            elif [ "$TOUCHES_WF" -gt 0 ] && [ "$CLAUDE_CFG" = "head" ]; then
+              PROBLEMS="${PROBLEMS}PR ADDS code-review.yml alongside other files — nothing can auto-review the enabling change; split it, or merge via the web UI after personal review. "
             elif [ "$TOUCHES_WF" -gt 0 ]; then
               PROBLEMS="${PROBLEMS}PR bundles code with a code-review.yml edit — Claude cannot review it; split the PR. "
             elif [ "$CLAUDE_ACTIVE" -eq 0 ]; then
-              PROBLEMS="${PROBLEMS}Claude configured but never reviewed this PR (check workflow/token). "
+              if [ -n "$HEAD_REPO" ] && [ "$HEAD_REPO" != "$REPO" ]; then
+                # Honest red, not a config hint: the review action cannot run on fork
+                # PRs (no secret access) — auto-review is unsupported there by design.
+                PROBLEMS="${PROBLEMS}fork PR — Claude auto-review cannot run on forks; maintainer review + web-UI merge. "
+              else
+                PROBLEMS="${PROBLEMS}Claude configured but never reviewed this PR (check workflow/token). "
+              fi
             else
               # LATEST claude[bot] verdict on the head (reviews are chronological → last),
               # so a later CHANGES_REQUESTED on the same SHA overrides an earlier APPROVED.
+              # Reviews predating a base retarget are filtered out — they judged a
+              # different effective diff ("" cutoff compares below every timestamp).
               LATEST=$(gh api --paginate --slurp "repos/$REPO/pulls/$PR_NUM/reviews" \
-                | jq -r "[add[] | select(.commit_id == \"$HEAD_SHA\" and .user.login == \"claude[bot]\")] | last | .state // \"NONE\"")
+                | jq -r --arg cut "$BASE_CUTOFF" "[add[] | select(.commit_id == \"$HEAD_SHA\" and .user.login == \"claude[bot]\") | select(.submitted_at > \$cut)] | last | .state // \"NONE\"")
               [ "$LATEST" != "APPROVED" ] && PROBLEMS="${PROBLEMS}Claude's latest verdict on head is ${LATEST}, not APPROVED. "
             fi
           fi
@@ -237,21 +307,21 @@ jobs:
             PROBLEMS="${PROBLEMS}Codex configured (AGENTS.md § Code Review Rules) but never touched this PR — comment '@codex review'. "
           fi
           if [ "$CODEX_ACTIVE" -gt 0 ]; then
-            THREADS=$(gh api graphql \
-              -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewThreads(first:100){totalCount nodes{isResolved comments(first:1){nodes{author{login}}}}}}}}' \
-              -F o="$OWNER" -F r="$NAME" -F n="$PR_NUM" \
-              --jq "{total: .data.repository.pullRequest.reviewThreads.totalCount, unresolved: ([.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | select(((.comments.nodes[0].author.login) // \"\") | IN(\"$CODEX_GQL\", \"$CODEX_REST\"))] | length)}")
-            TOTAL_THREADS=$(echo "$THREADS" | jq .total)
-            UNRESOLVED=$(echo "$THREADS" | jq .unresolved)
-            [ "$TOTAL_THREADS" -gt 100 ] && PROBLEMS="${PROBLEMS}${TOTAL_THREADS} review threads — too many to verify (cap 100). "
             [ "$UNRESOLVED" -gt 0 ] && PROBLEMS="${PROBLEMS}${UNRESOLVED} unresolved Codex thread(s). "
 
             # Clean = a Codex comment with the exact clean phrase whose embedded 10+ hex-char
             # SHA prefixes the head. Reaction is NOT trusted here (no event re-fires it).
+            # The clean comment must also postdate BOTH the last base retarget and Codex's
+            # latest REVIEW on the PR — a findings review landing on the same head AFTER an
+            # old clean comment means the clean verdict is superseded, not current.
+            CODEX_LAST_REVIEW=$(gh api --paginate --slurp "repos/$REPO/pulls/$PR_NUM/reviews" \
+              | jq -r "[add[] | select(.user.login == \"$CODEX_REST\") | .submitted_at] | max // \"\"")
+            CODEX_CUTOFF="$BASE_CUTOFF"
+            [ "$CODEX_LAST_REVIEW" \> "$CODEX_CUTOFF" ] && CODEX_CUTOFF="$CODEX_LAST_REVIEW"
             CLEAN=$(gh api --paginate "repos/$REPO/issues/$PR_NUM/comments" \
-              --jq "[.[] | select(.user.login == \"$CODEX_REST\") | select(.body | test(\"didn'?t find any major issues\"; \"i\")) | select([.body | scan(\"[0-9a-f]{10,40}\") | . as \$s | select(\"$HEAD_SHA\" | startswith(\$s))] | length > 0)] | length" \
+              --jq "[.[] | select(.user.login == \"$CODEX_REST\") | select(.created_at > \"$CODEX_CUTOFF\") | select(.body | test(\"didn'?t find any major issues\"; \"i\")) | select([.body | scan(\"[0-9a-f]{10,40}\") | . as \$s | select(\"$HEAD_SHA\" | startswith(\$s))] | length > 0)] | length" \
               | awk '{s+=$1} END {print s+0}')
-            [ "$CLEAN" -eq 0 ] && PROBLEMS="${PROBLEMS}Codex has no clean signal on head (comment '@codex review'). "
+            [ "$CLEAN" -eq 0 ] && PROBLEMS="${PROBLEMS}Codex has no current clean signal on head (comment '@codex review'). "
           fi
 
           # Companion visibility status: the Codex app posts comments only — it never
@@ -279,7 +349,9 @@ jobs:
           # local hook merge-gate.mjs). A workflow-only self-edit in a repo with no Codex
           # leg would otherwise fall through to green with no review at all — the Claude
           # action self-skips code-review.yml PRs, so nothing looked at the change.
-          if [ -n "$NOTE" ] && [ -z "$CODEX_CFG" ] && [ "$CODEX_ACTIVE" -eq 0 ]; then
+          # Keyed on WAIVED, not NOTE: NOTE also carries the base-retarget notice, and a
+          # NOTE-keyed guard permanently deadlocked every retargeted PR in Claude-only repos.
+          if [ "$WAIVED" -eq 1 ] && [ -z "$CODEX_CFG" ] && [ "$CODEX_ACTIVE" -eq 0 ]; then
             PROBLEMS="${PROBLEMS}self-edit waiver leaves ZERO reviewers — merge via the web UI after personal review. "
           fi
 

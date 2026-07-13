@@ -17,8 +17,10 @@
 # target repo's root. (Don't ALSO run a Claude Code scheduled task for sweeping —
 # it prompts under interactive permissions and doesn't take this script's lock.)
 #
-# Needs: `claude` CLI + `gh` CLI authenticated as you. Must run from the repo root
-# (the pr-review-loop skill is project-local). By default it handles PRs YOU authored;
+# Needs: `claude` CLI + `gh` CLI authenticated as you. Must run from the repo root,
+# on a CLEAN checkout of the DEFAULT branch — the sweep refuses dirty trees and
+# feature-branch checkouts (the policy/settings it loads come from the working
+# tree). By default it handles PRs YOU authored;
 # pass --all to babysit every open PR in the repo (e.g. one maintainer covering a team).
 #
 # Headless fix ceiling (deliberate): the allowlist carries no project build/test
@@ -35,6 +37,18 @@
 set -euo pipefail
 # cron ships a bare PATH (/usr/bin:/bin) — claude/gh/jq live in homebrew paths.
 export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
+# Unknown flags fail hard BEFORE anything runs: a typo'd `--instal-cron` must not
+# fall through and start a real write-capable sweep. The same loop detects
+# --install-cron at ANY position — a positional-only check let
+# `--all --all --install-cron` skip the installer and start a real sweep.
+INSTALL_CRON=""
+for arg in "$@"; do
+  case "$arg" in
+    --all) ;;
+    --install-cron) INSTALL_CRON=1 ;;
+    *) echo "usage: babysit.sh [--all] [--install-cron]  (unknown argument: $arg)"; exit 1 ;;
+  esac
+done
 [ -f .github/ai-review-loop.md ] || { echo "run from a repo with ai-review-kit installed"; exit 1; }
 
 # Desktop notifications — marker-file protocol, NO executable entry point for the
@@ -58,14 +72,19 @@ NOTIFY_MARKER=".claude/.babysit-notify"
 #            README § Portability: https://github.com/kristijan-kresic-hvar/ai-review-kit
 # The job invokes this script by its resolved absolute path, so it works for the
 # repo-installed copy and a shared kit clone alike.
-if [ "${1:-}" = "--install-cron" ] || [ "${2:-}" = "--install-cron" ]; then
+if [ -n "$INSTALL_CRON" ]; then
   SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
-  # Fail closed on quote-bearing paths: the generated bash -c / cron command single-
-  # quotes both paths, and a path containing ' would break out of the quoting. Rare
+  # Fail closed on quote-bearing paths/values: the generated bash -c / cron command
+  # single-quotes them, and a value containing ' would break out of the quoting. Rare
   # enough that refusing beats shipping a shell-escaping library.
-  case "$(pwd)$SELF" in *"'"*) echo "checkout or kit path contains a single quote — unsupported for scheduling; move/rename and retry"; exit 1 ;; esac
+  case "$(pwd)$SELF${AI_CLI:-}" in *"'"*) echo "checkout, kit path, or AI_CLI contains a single quote — unsupported for scheduling; move/rename and retry"; exit 1 ;; esac
   SCHED_ARGS=""
   for arg in "$@"; do [ "$arg" = "--all" ] && SCHED_ARGS=" --all"; done
+  # Persist a non-default AI_CLI into the scheduled command — without this,
+  # `AI_CLI=codex babysit.sh --install-cron` installs a job that silently sweeps
+  # with claude (the env var dies with the install shell).
+  SCHED_ENV=""
+  [ "${AI_CLI:-claude}" != "claude" ] && SCHED_ENV="AI_CLI='${AI_CLI}' "
   if [ "$(uname)" = "Darwin" ]; then
     # Label = basename + short path hash: two checkouts named alike (~/work/x and
     # ~/scratch/x) must not share a plist path and silently unload each other.
@@ -80,7 +99,7 @@ if [ "${1:-}" = "--install-cron" ] || [ "${2:-}" = "--install-cron" ]; then
   <key>Label</key><string>$LABEL</string>
   <key>ProgramArguments</key><array>
     <string>/bin/bash</string><string>-c</string>
-    <string>cd '$(pwd)' || exit 1; '$SELF'$SCHED_ARGS</string>
+    <string>cd '$(pwd)' || exit 1; ${SCHED_ENV}'$SELF'$SCHED_ARGS</string>
   </array>
   <key>StartInterval</key><integer>1800</integer>
   <key>RunAtLoad</key><true/>
@@ -101,21 +120,32 @@ PLIST_EOF
     # Paths single-quoted: a checkout under 'Client Projects/...' must not token-split
     # or execute as shell syntax inside cron. (Paths containing a single quote remain
     # unsupported — vanishingly rare; the installer is not a shell-escaping library.)
-    LINE="*/30 * * * * cd '$(pwd)' && '$SELF'$SCHED_ARGS >> \"\$HOME/.ai-review-kit-babysit.log\" 2>&1"
+    # cron additionally treats % as end-of-command/newline — a %-bearing value would
+    # silently truncate the job (AI_CLI is in scope: SCHED_ENV splices it into the
+    # line). A backslash breaks the awk match keys below (awk -v escape-processes its
+    # values), so re-installs would stack instead of replace. Same fail-closed posture.
+    case "$(pwd)$SELF${AI_CLI:-}" in *"%"*|*"\\"*) echo "checkout, kit path, or AI_CLI contains % or \\ — unsupported for cron scheduling; move/rename and retry"; exit 1 ;; esac
+    LINE="*/30 * * * * cd '$(pwd)' && ${SCHED_ENV}'$SELF'$SCHED_ARGS >> \"\$HOME/.ai-review-kit-babysit.log\" 2>&1"
     if ! command -v crontab >/dev/null 2>&1; then
       echo "no crontab on this system — schedule manually: kit README § Portability"; echo "  https://github.com/kristijan-kresic-hvar/ai-review-kit#portability--new-machine-any-os-any-teammate"; exit 1
     fi
     # Idempotency keys on the exact install fragment — script path alone breaks the
     # shared-kit-clone-many-repos case (same $SELF for every repo); checkout path
     # alone false-matches unrelated jobs that cd here. Both together are unambiguous.
-    FRAG="cd '$(pwd)' && '$SELF'$SCHED_ARGS"
+    FRAG="cd '$(pwd)' && ${SCHED_ENV}'$SELF'$SCHED_ARGS"
     if crontab -l 2>/dev/null | grep -qF "$FRAG"; then
       echo "already scheduled — this repo's babysitter crontab entry exists:"
       crontab -l | grep -F "$FRAG"
     else
       # `crontab -l` exits non-zero when no crontab exists yet; under set -e that
       # aborted the subshell BEFORE echo — first-time installs silently did nothing.
-      ( crontab -l 2>/dev/null || true; echo "$LINE" ) | crontab -
+      # REPLACE (never stack) any prior entry for this repo+script whose flags/env
+      # differ: two live entries would race the lock on every tick and the loser's
+      # "another sweep is running" noise would look like a fault. Match on BOTH the
+      # checkout path and the script path (same keys as FRAG, minus the mutable bits).
+      { crontab -l 2>/dev/null || true; } \
+        | awk -v a="cd '$(pwd)' && " -v b="'$SELF'" 'index($0,a)==0 || index($0,b)==0' \
+        | { cat; echo "$LINE"; } | crontab -
       echo "installed: $LINE"
       echo "log: ~/.ai-review-kit-babysit.log · view schedule: crontab -l"
     fi
@@ -134,13 +164,17 @@ fi
 LOCK=".claude/.babysit.lock"
 if ! mkdir "$LOCK" 2>/dev/null; then
   if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +120 2>/dev/null)" ]; then
-    echo "stealing stale lock (>2h old)"; rmdir "$LOCK" 2>/dev/null || true
+    echo "stealing stale lock (>2h old)"; rm -rf "$LOCK" 2>/dev/null || true
     mkdir "$LOCK" 2>/dev/null || { echo "another sweep is running — exiting"; exit 0; }
   else
     echo "another sweep is running — exiting"; exit 0
   fi
 fi
-trap 'rmdir "$LOCK" 2>/dev/null; [ -n "$NOTIFY_SNAP" ] && rm -rf "$(dirname "$NOTIFY_SNAP")" 2>/dev/null; true' EXIT
+# Owner token: only the process that TOOK the lock may remove it. Without it, a hung
+# sweep outliving the 2h stale-steal would, on eventually exiting, delete the stealing
+# run's lock — letting a third sweep overlap the second on the same PRs.
+echo "$$" > "$LOCK/owner"
+trap '[ "$(cat "$LOCK/owner" 2>/dev/null)" = "$$" ] && rm -rf "$LOCK" 2>/dev/null; [ -n "$NOTIFY_SNAP" ] && rm -rf "$(dirname "$NOTIFY_SNAP")" 2>/dev/null; true' EXIT
 
 # Stale-marker cleanup INSIDE the lock — done pre-lock, a second launch would wipe the
 # still-running first sweep's queued notifications before bouncing off the lock.
@@ -148,8 +182,23 @@ rm -f "$NOTIFY_MARKER"
 
 # Unattended agents never run over uncommitted human work: a write-capable sweep in a
 # dirty checkout can sweep local changes into PR-branch commits. Fail quiet, fail closed.
-if [ -n "$(git status --porcelain)" ]; then
+# The explicit assignment matters: a FAILED `git status` yields an empty substitution,
+# which the bare [ -n ... ] test read as "clean" — couldn't-check must never mean clean.
+DIRTY=$(git status --porcelain) || { echo "git status failed — refusing unattended sweep"; exit 1; }
+if [ -n "$DIRTY" ]; then
   echo "working tree dirty — refusing unattended sweep (commit/stash first)"; exit 0
+fi
+
+# Pin the sweep to the DEFAULT branch: the policy the agent loads (.github/
+# ai-review-loop.md, .claude/ settings) comes from THIS working tree — a checkout left
+# on a feature branch would feed the unattended run branch-authored policy. The gh call
+# also resolves the repo slug + default branch for the prompt and the push deny below.
+REPO_INFO=$(gh repo view --json nameWithOwner,defaultBranchRef --jq '.nameWithOwner + " " + .defaultBranchRef.name')
+REPO_SLUG=${REPO_INFO%% *}
+DEFAULT_BRANCH=${REPO_INFO##* }
+CUR_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+if [ "$CUR_BRANCH" != "$DEFAULT_BRANCH" ]; then
+  echo "checkout is on '$CUR_BRANCH', not default branch '$DEFAULT_BRANCH' — refusing unattended sweep"; exit 0
 fi
 
 # Snapshot the notify helper only now — every early-exit above leaks nothing, and the
@@ -165,9 +214,8 @@ for arg in "$@"; do [ "$arg" = "--all" ] && SCOPE="by ANY author"; done
 
 # Hard repo scope: the playbook's enumerate is account-wide by default; a repo-local
 # cron must not act on other repos (their own crons/sessions own them). Observed live:
-# without the explicit slug, a sweep crossed repos.
-REPO_SLUG=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
-
+# without the explicit slug, a sweep crossed repos. (REPO_SLUG resolved above,
+# alongside the default-branch pin.)
 PROMPT="Read .github/ai-review-loop.md fully and run its sweep mode restricted STRICTLY to the repository ${REPO_SLUG} — filter the enumerate to that repo, and ignore PRs in any other repository. Repo-scope every command: -R ${REPO_SLUG} on gh pr/gh search commands, fully-qualified repos/${REPO_SLUG}/... paths on gh api calls (gh api has no -R flag). Scope: OPEN, non-draft pull requests ${SCOPE} — never touch merged, closed, or draft PRs. Nothing actionable = exit with one quiet line."
 if [ -n "$NOTIFY_SNAP" ]; then
   PROMPT="$PROMPT Where the playbook says to notify the human (converged PR, critical escalation, dead reviewer leg, security-fix FYI), APPEND one line per event to the file $NOTIFY_MARKER (Write tool) — the launcher delivers desktop notifications from it after the sweep; that is your only notification channel."
@@ -190,12 +238,17 @@ case "$AI_CLI" in
     # plain POST endpoints (create comment/issue/ref-via-REST) — spammy at worst,
     # no history rewrite or default-branch move without a method flag. git push
     # denies cover bare pushes (branch inferred from a default-branch checkout)
-    # and ANY refspec containing main/master (`origin HEAD:main`); branch names
-    # containing 'main'/'master' over-block — fail-closed, rename the branch.
+    # and ANY refspec containing main/master OR this repo's actual default branch
+    # (`origin HEAD:trunk` on a trunk-default repo slipped every static pattern);
+    # branch names containing those words over-block — fail-closed, rename.
+    # NOTE: allow/deny rules MERGE with any .claude/settings.json in the checkout
+    # (allows are additive across sources; deny still always wins) — one more
+    # reason the sweep only runs from a default-branch checkout (enforced above):
+    # settings are the default branch's, not a PR branch's.
     ALLOWED="Skill,Read,Glob,Grep,Edit,Write,Bash(jq:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr checks:*),Bash(gh api:*),Bash(gh search:*),Bash(gh workflow run:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git worktree:*),Bash(git checkout:*),Bash(git fetch:*)"
     claude -p "$PROMPT" \
       --allowedTools "$ALLOWED" \
-      --disallowedTools "Bash(gh pr merge:*),Bash(gh api* -X *),Bash(gh api*--method*),Bash(gh api*/merge*),Bash(gh api*merges*),Bash(gh api*mergePullRequest*),Bash(gh api*createCommitOnBranch*),Bash(gh api*updateRef*),Bash(gh api*deleteRef*),Bash(gh api*createRef*),Bash(gh api*/git/*),Bash(git push),Bash(git push origin),Bash(git push origin HEAD),Bash(git push -u origin HEAD),Bash(git push*HEAD),Bash(git push*main*),Bash(git push*master*)" || echo "[babysit] claude exited non-zero" ;;
+      --disallowedTools "Bash(gh pr merge:*),Bash(gh api* -X *),Bash(gh api*--method*),Bash(gh api*/merge*),Bash(gh api*merges*),Bash(gh api*mergePullRequest*),Bash(gh api*createCommitOnBranch*),Bash(gh api*updateRef*),Bash(gh api*deleteRef*),Bash(gh api*createRef*),Bash(gh api*/git/*),Bash(git push),Bash(git push origin),Bash(git push origin HEAD),Bash(git push -u origin HEAD),Bash(git push*HEAD),Bash(git push*main*),Bash(git push*master*),Bash(git push*${DEFAULT_BRANCH}*)" || echo "[babysit] claude exited non-zero" ;;
   codex)
     # --full-auto: workspace-write + on-request network. Smoke-tested 2026-07-13: an
     # idle sweep works OUT OF THE BOX — the sandbox blocks gh's network, and Codex
