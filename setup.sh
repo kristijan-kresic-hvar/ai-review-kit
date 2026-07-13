@@ -14,7 +14,9 @@ for a in "$@"; do
   esac
 done
 
-[ -d .git ] || { echo "error: run from the target repo's root (no .git here)"; exit 1; }
+# -e, not -d: linked worktrees and submodules have a .git FILE, and they are valid
+# install targets too.
+[ -e .git ] || { echo "error: run from the target repo's root (no .git here)"; exit 1; }
 mkdir -p .github/workflows
 
 # Branch hygiene: merged PR branches auto-delete (GitHub repo setting). Best-effort —
