@@ -263,12 +263,17 @@ jobs:
           }
           CODEX_CFG=$(codexCfg)
 
-          # A leg applies when CONFIGURED or the bot has ACTIVITY on this PR.
+          # A leg applies when CONFIGURED or the bot has ACTIVITY on this PR. A Codex
+          # ONBOARDING comment ("To use Codex here, create an environment for this repo")
+          # is posted when Codex is NOT set up — it is the opposite of review activity and
+          # must NOT count, or its bare presence flips the Codex leg on and demands a clean
+          # signal Codex can never produce (no environment = no review), deadlocking a
+          # clean PR red (observed live 2026-07-13). Excluded from the comment leg here.
           CLAUDE_ACTIVE=$(gh api --paginate "repos/$REPO/pulls/$PR_NUM/reviews" \
             --jq "[.[] | select(.user.login == \"claude[bot]\")] | length" | awk '{s+=$1} END {print s+0}')
           CODEX_ACTIVE=$(( \
             $(gh api --paginate "repos/$REPO/pulls/$PR_NUM/reviews" --jq "[.[] | select(.user.login == \"$CODEX_REST\")] | length" | awk '{s+=$1} END {print s+0}') + \
-            $(gh api --paginate "repos/$REPO/issues/$PR_NUM/comments" --jq "[.[] | select(.user.login == \"$CODEX_REST\")] | length" | awk '{s+=$1} END {print s+0}') + \
+            $(gh api --paginate "repos/$REPO/issues/$PR_NUM/comments" --jq "[.[] | select(.user.login == \"$CODEX_REST\") | select((.body | test(\"to use codex here|create an environment for this repo\"; \"i\")) | not)] | length" | awk '{s+=$1} END {print s+0}') + \
             $(gh api --paginate "repos/$REPO/issues/$PR_NUM/reactions" --jq "[.[] | select(.user.login == \"$CODEX_REST\")] | length" | awk '{s+=$1} END {print s+0}') ))
 
           # Threads are shared gate state (not Codex-only): the playbook's escalation
