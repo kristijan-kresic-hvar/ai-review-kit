@@ -35,10 +35,19 @@ set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
 [ -f .github/ai-review-loop.md ] || { echo "run from a repo with ai-review-kit installed"; exit 1; }
 
-# Desktop-notification helper (sibling file): the ONLY notification capability the
-# agent gets — a raw osascript allowlist entry would hand it all of AppleScript.
+# Desktop notifications — marker-file protocol, NO executable entry point for the
+# agent: an allowlisted script inside the writable checkout would be a self-rewritable
+# approved command (the agent has Write). Instead the agent writes its message to a
+# marker file, and THIS launcher delivers it after the run — via a read-only snapshot
+# of the helper taken BEFORE the agent ran, so mid-run tampering never executes.
 NOTIFY="$(cd "$(dirname "$0")" && pwd)/ai-review-notify.sh"
 [ -x "$NOTIFY" ] || NOTIFY=""
+NOTIFY_SNAP=""
+if [ -n "$NOTIFY" ]; then
+  SNAP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/ai-review-notify.XXXXXX") &&     cp "$NOTIFY" "$SNAP_DIR/notify.sh" && chmod 555 "$SNAP_DIR/notify.sh" &&     NOTIFY_SNAP="$SNAP_DIR/notify.sh" || NOTIFY_SNAP=""
+fi
+NOTIFY_MARKER=".claude/.babysit-notify"
+rm -f "$NOTIFY_MARKER"
 
 # --install-cron: schedule THIS repo's sweep every 30 min, idempotently.
 #   macOS  → LaunchAgent, NOT crontab: gh and claude store credentials in the login
@@ -78,13 +87,18 @@ PLIST_EOF
     echo "log: ~/.ai-review-kit-babysit.log · status: launchctl list | grep ai-review-kit"
     echo "NOTE: remove any old crontab line for this repo — cron cannot reach the Keychain."
   else
-    LINE="*/30 * * * * cd $(pwd) && $SELF >> \"\$HOME/.ai-review-kit-babysit.log\" 2>&1"
+    # Paths single-quoted: a checkout under 'Client Projects/...' must not token-split
+    # or execute as shell syntax inside cron. (Paths containing a single quote remain
+    # unsupported — vanishingly rare; the installer is not a shell-escaping library.)
+    LINE="*/30 * * * * cd '$(pwd)' && '$SELF' >> \"\$HOME/.ai-review-kit-babysit.log\" 2>&1"
     if ! command -v crontab >/dev/null 2>&1; then
       echo "no crontab on this system — schedule manually: kit README § Portability"; echo "  https://github.com/kristijan-kresic-hvar/ai-review-kit#portability--new-machine-any-os-any-teammate"; exit 1
     fi
-    if crontab -l 2>/dev/null | grep -qF "cd $(pwd) "; then
-      echo "already scheduled — a crontab entry for $(pwd) exists:"
-      crontab -l | grep -F "cd $(pwd) "
+    # Idempotency keys on the SCRIPT path, not the checkout path — an unrelated cron
+    # job that merely cd's into this repo (backup, build) must not read as "scheduled".
+    if crontab -l 2>/dev/null | grep -qF "$SELF"; then
+      echo "already scheduled — a babysitter crontab entry exists:"
+      crontab -l | grep -F "$SELF"
     else
       (crontab -l 2>/dev/null; echo "$LINE") | crontab -
       echo "installed: $LINE"
@@ -128,8 +142,8 @@ SCOPE="authored by me (--author @me)"
 REPO_SLUG=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
 
 PROMPT="Read .github/ai-review-loop.md fully and run its sweep mode restricted STRICTLY to the repository ${REPO_SLUG} — filter the enumerate to that repo, and ignore PRs in any other repository. Repo-scope every command: -R ${REPO_SLUG} on gh pr/gh search commands, fully-qualified repos/${REPO_SLUG}/... paths on gh api calls (gh api has no -R flag). Scope: OPEN, non-draft pull requests ${SCOPE} — never touch merged, closed, or draft PRs. Nothing actionable = exit with one quiet line."
-if [ -n "$NOTIFY" ]; then
-  PROMPT="$PROMPT Where the playbook says to notify the human (converged PR, critical escalation, dead reviewer leg, security-fix FYI), run: $NOTIFY '<one-line message>' — that is your only notification channel."
+if [ -n "$NOTIFY_SNAP" ]; then
+  PROMPT="$PROMPT Where the playbook says to notify the human (converged PR, critical escalation, dead reviewer leg, security-fix FYI), APPEND one line per event to the file $NOTIFY_MARKER (Write tool) — the launcher delivers desktop notifications from it after the sweep; that is your only notification channel."
 fi
 
 # AI_CLI picks the agent. claude (default) is the supported, live-tested path.
@@ -152,7 +166,6 @@ case "$AI_CLI" in
     # and ANY refspec containing main/master (`origin HEAD:main`); branch names
     # containing 'main'/'master' over-block — fail-closed, rename the branch.
     ALLOWED="Skill,Read,Glob,Grep,Edit,Write,Bash(jq:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr checks:*),Bash(gh api:*),Bash(gh search:*),Bash(gh workflow run:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git worktree:*),Bash(git checkout:*),Bash(git fetch:*)"
-    [ -n "$NOTIFY" ] && ALLOWED="$ALLOWED,Bash($NOTIFY:*)"
     claude -p "$PROMPT" \
       --allowedTools "$ALLOWED" \
       --disallowedTools "Bash(gh pr merge:*),Bash(gh api* -X *),Bash(gh api*--method*),Bash(gh api*/merge*),Bash(gh api*merges*),Bash(gh api*mergePullRequest*),Bash(gh api*createCommitOnBranch*),Bash(gh api*updateRef*),Bash(gh api*deleteRef*),Bash(gh api*createRef*),Bash(gh api*/git/*),Bash(git push),Bash(git push origin),Bash(git push origin HEAD),Bash(git push -u origin HEAD),Bash(git push*HEAD),Bash(git push*main*),Bash(git push*master*)" ;;
@@ -171,3 +184,14 @@ case "$AI_CLI" in
     # Executed verbatim with the prompt appended: unsupported, no guardrails, no promises.
     $AI_CLI "$PROMPT" ;;
 esac
+
+# Deliver queued notifications from the marker file — via the pre-run read-only
+# snapshot, never the (agent-writable) checkout copy. Max 3, each line truncated;
+# the agent controls only the TEXT (argv-passed, injection-safe), never code.
+if [ -n "$NOTIFY_SNAP" ] && [ -f "$NOTIFY_MARKER" ]; then
+  head -3 "$NOTIFY_MARKER" | cut -c1-200 | while IFS= read -r line; do
+    [ -n "$line" ] && "$NOTIFY_SNAP" "$line"
+  done
+  rm -f "$NOTIFY_MARKER"
+fi
+[ -n "$NOTIFY_SNAP" ] && rm -rf "$(dirname "$NOTIFY_SNAP")" || true
