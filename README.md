@@ -166,7 +166,7 @@ Then the manual steps the script prints:
    protection requiring human review + not merging on red. A repo needing a
    tamper-proof gate wants a required check that runs from trusted (default-branch)
    code — outside this kit's scope.
-5. **Babysitter (per developer, once) — cron is the recommended path:**
+5. **Babysitter (per developer, once) — the scheduled sweep is the recommended path** (installs a LaunchAgent on macOS, a crontab entry on Linux — the flag name is historical):
    ```bash
    cd <your-repo> && path/to/ai-review-kit/babysit.sh --install-cron   # idempotent
    ```
@@ -328,6 +328,7 @@ code with. Only the fix loop's kickoff depends on your agent:
 | `CLAUDE.md.section` | Appended to the repo's CLAUDE.md — auto-runs the loop after Claude-opened PRs |
 | `setup.sh` | One-shot installer + auth checklist |
 | `test/smoke.sh` | Stubbed end-to-end babysitter smoke test (isolation, lock, arg handling) |
+| `ai-review-notify.sh` | Desktop-notification helper the babysitter snapshots + calls on human-input-needed escalations |
 
 ## License
 
