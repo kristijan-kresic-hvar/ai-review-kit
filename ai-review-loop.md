@@ -166,11 +166,19 @@ can resolve the wrong finding.
 - Claude re-runs on the push automatically. Codex runs ONLY on an `@codex review`
   comment, and the `gh` login posting it must be a **Codex-connected human account** —
   Codex silently rejects CI-bot triggers (tested live).
-- Codex acks with a 👀 reaction within ~1 min (no 👀 = re-fire; cap 3 per head), review
-  lands in ~5–15 min. One un-acked Codex trigger in flight at a time — simultaneous
-  triggers drop silently. **At the re-fire cap with no ack (dead leg):** post ONE
-  "Codex unresponsive — adversarial pass unverified, DO NOT merge" comment (dedupe per
-  head) + notify, then leave the PR; a new push resets the cap.
+- Codex acks with a 👀 reaction (usually <1 min) and the review lands in ~5–15 min —
+  but a trigger comment can drop silently, no ack and no review ever (observed live:
+  dropped webhook/outage on a PR whose earlier trigger had completed in ~2 min).
+  **Trigger timeout — a trigger is never fire-and-forget:** after posting
+  `@codex review`, if NEITHER a 👀 ack NOR a review/clean comment naming the current
+  head arrives within ~10 min, post ONE fresh `@codex review` comment (a NEW comment =
+  a new webhook event; editing the old one fires nothing). If the retry is also silent
+  for ~10 min, stop — **dead leg:** post ONE "Codex unresponsive (dropped webhook /
+  outage) — adversarial pass unverified, DO NOT merge" comment (dedupe per head) +
+  notify, then leave the PR; the human decides — never retry beyond that one. A new
+  push resets the timeout. One unanswered trigger in flight at a time — simultaneous
+  triggers drop silently. If the session ends before a window elapses, the babysitter's
+  30-min sweep is the unattended fallback: it re-checks un-acked triggers next pass.
 - Codex completion shapes: findings = COMMENTED review + inline comments on head;
   clean = issue comment "Didn't find any major issues" naming the head commit;
   "nothing new" while old threads were open = an EMPTY COMMENTED review — resolve the
@@ -239,7 +247,7 @@ nit-level disagreements (resolve with reasoning), security fixes that verify cle
   - **Reviewer in flight** (👀 ack, or <20 min since push) → leave it. Never act while
     any reviewer is mid-review on the head — triage the complete set once.
   - **Codex trigger needed** (>20 min since push, no ack) → fire it, respecting the
-    caps and dead-leg rule above.
+    trigger-timeout and dead-leg rule above.
   - **Claude leg unmet with zero open findings** (no review on head, COMMENTED-only,
     or CHANGES_REQUESTED with every thread already dispositioned) → push ONE empty
     nudge commit `ci: nudge claude re-review`. **Stateless cap: before nudging, check

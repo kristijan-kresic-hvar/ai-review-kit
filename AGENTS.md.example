@@ -13,7 +13,7 @@ reviewers treat stated trade-offs as intentional and verify Verification claims.
 After OPENING a pull request, immediately and without being asked: fire the Codex
 review trigger (`gh pr comment <N> --body "@codex review"` — skip only if a Codex
 review/ack already exists for this head), then follow `.github/ai-review-loop.md` to
-convergence. It is autonomous by design — verified fixes, every thread replied to AND
+convergence — including its trigger-timeout rule; the trigger is not fire-and-forget. It is autonomous by design — verified fixes, every thread replied to AND
 resolved, re-triggers; only its critical escalations stop for a human, and it NEVER
 merges.
 
