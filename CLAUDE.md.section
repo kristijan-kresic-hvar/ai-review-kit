@@ -13,6 +13,11 @@ Rules` section in AGENTS.md) — then read `.github/ai-review-loop.md` fully and
 it to convergence. It is autonomous by design — only its critical escalations stop for a
 human, and it NEVER merges. Report the end state in one line.
 
+After ANY push to an already-open pull request — inside a loop round or not (amending
+a docs PR, a follow-up commit): re-fire the Codex trigger for the new head — skip it if
+an ack for this head already exists OR the repo has no Codex leg. Claude re-runs on the
+push automatically; Codex runs ONLY on the trigger.
+
 At the START of a session in this repo: `gh search prs --author "@me" --state open
 --repo <this repo's owner/name>` — THIS repository only (other repos' sweeps belong to
 their own sessions/crons); anything actionable → run the playbook's sweep mode

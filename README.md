@@ -188,8 +188,10 @@ Then the manual steps the script prints:
 ## The fix loop
 
 `setup.sh` installs the canonical playbook as `.github/ai-review-loop.md` plus a thin
-Claude Code skill shim. PRs opened from Claude Code start the loop unprompted
-(CLAUDE.md wiring); PRs opened any other way get picked up by the babysitter sweep.
+Claude Code skill shim. PRs opened from Claude Code start the loop unprompted, and any
+later push to an open PR re-fires the Codex trigger for the new head unless an ack for
+that head exists (CLAUDE.md wiring); PRs opened any other way get picked up by the
+babysitter sweep.
 
 What it does without asking: triages every finding against the actual code, fixes what
 clears the worth-it bar (verification-gated — typecheck/lint/tests, exercise the flow
