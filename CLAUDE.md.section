@@ -10,7 +10,8 @@ After opening ANY pull request in this repo, immediately and without being asked
 fire the Codex trigger (`gh pr comment <N> --body "@codex review"`) — skip it if an
 ack for this head already exists OR the repo has no Codex leg (no `## Code Review
 Rules` section in AGENTS.md) — then read `.github/ai-review-loop.md` fully and drive
-it to convergence. It is autonomous by design — only its critical escalations stop for a
+it to convergence. The trigger is NOT fire-and-forget: the playbook's trigger-timeout
+rule owns confirming Codex actually responded. It is autonomous by design — only its critical escalations stop for a
 human, and it NEVER merges. Report the end state in one line.
 
 After ANY push to an already-open pull request — inside a loop round or not (amending
